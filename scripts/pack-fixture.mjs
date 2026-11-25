@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { gunzipSync } from "node:zlib";
+import { redactedMessage } from "../lib/safety.mjs";
 
 // Exercise the real packer with private-file sentinels in a disposable source
 // copy. Reuse installed dependencies for import only; do not install or publish.
@@ -21,7 +22,7 @@ const env = { ...process.env, npm_config_ignore_scripts: "true" };
 function command(executable, argv, cwd) {
   const result = spawnSync(executable, argv, { cwd, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 30000, maxBuffer: 4 * 1024 * 1024 });
   if (result.error) throw result.error;
-  assert.equal(result.status, 0, `Package fixture command failed: ${path.basename(executable)} ${argv[0]}`);
+  assert.equal(result.status, 0, `Package fixture command failed: ${path.basename(executable)} ${argv[0]}: ${redactedMessage(result.stderr || result.stdout || "no child error detail")}`);
   return result.stdout;
 }
 const pack = (argv, cwd) => command(javascriptPM ? process.execPath : pm, javascriptPM ? [pm, ...argv] : argv, cwd);

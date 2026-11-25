@@ -25,6 +25,26 @@ test("package gate validates source metadata, runtime graph and no-network impor
   assert.equal(value.publishedFiles, 28);
 });
 
+test("archive fixture reports bounded, redacted child failures rather than hiding the root cause", async () => {
+  const parent = await realpath(tmpdir()), directory = await mkdtemp(path.join(parent, "anyrouter-packer-error-"));
+  try {
+    const packer = path.join(directory, "packer.cjs");
+    await writeFile(packer, 'console.error("ERR_SYNTHETIC_PACK_FAILURE sk-synthetic-echoed-secret"); process.exit(2);');
+    const result = spawnSync(node, [path.join(root, "scripts", "pack-fixture.mjs")], {
+      cwd: root, encoding: "utf8", timeout: 10000, env: { ...process.env, ANYROUTER_TEST_PNPM: packer },
+    });
+    if (result.error) throw result.error;
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /ERR_SYNTHETIC_PACK_FAILURE/);
+    assert.equal(result.stderr.includes("sk-synthetic-echoed-secret"), false);
+  } finally {
+    const resolved = await realpath(directory);
+    assert.equal(path.dirname(resolved).toLowerCase(), parent.toLowerCase());
+    assert.match(path.basename(resolved), /^anyrouter-packer-error-/);
+    await rm(resolved, { recursive: true, force: true });
+  }
+});
+
 test("package gate refuses a private-file pack report instead of trusting the manifest", async () => {
   const parent = await realpath(tmpdir()), directory = await mkdtemp(path.join(parent, "anyrouter-package-report-"));
   try {
