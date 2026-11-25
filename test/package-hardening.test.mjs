@@ -45,6 +45,30 @@ test("archive fixture reports bounded, redacted child failures rather than hidin
   }
 });
 
+test("archive smoke retains dependency files when copy filters receive Windows namespaced paths", async () => {
+  const parent = await realpath(tmpdir()), directory = await mkdtemp(path.join(parent, "anyrouter-copy-path-"));
+  try {
+    const preloader = path.join(directory, "namespaced-copy.cjs");
+    await writeFile(preloader, `
+      const fs = require("node:fs/promises"), path = require("node:path");
+      const copy = fs.cp;
+      fs.cp = (source, target, options = {}) => copy(source, target, {
+        ...options,
+        ...(options.filter ? { filter: (file, destination) => options.filter(path.toNamespacedPath(file), destination) } : {}),
+      });
+    `);
+    const result = spawnSync(node, ["--require", preloader, checker, "--smoke"], { cwd: root, encoding: "utf8", timeout: 10000 });
+    if (result.error) throw result.error;
+    assert.equal(result.status, 0, "Copied dependencies must remain importable through either Windows path form.");
+    assert.equal(JSON.parse(result.stdout).isolatedImport, true);
+  } finally {
+    const resolved = await realpath(directory);
+    assert.equal(path.dirname(resolved).toLowerCase(), parent.toLowerCase());
+    assert.match(path.basename(resolved), /^anyrouter-copy-path-/);
+    await rm(resolved, { recursive: true, force: true });
+  }
+});
+
 test("package gate refuses a private-file pack report instead of trusting the manifest", async () => {
   const parent = await realpath(tmpdir()), directory = await mkdtemp(path.join(parent, "anyrouter-package-report-"));
   try {

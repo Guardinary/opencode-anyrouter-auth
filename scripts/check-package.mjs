@@ -110,8 +110,14 @@ async function copyDependencies(name, from, destination, seen) {
   const { directory, pkg } = await dependencyRoot(name, from);
   if (seen.has(name)) { assert.equal(seen.get(name), pkg.version, "Conflicting dependency versions cannot be flattened in this smoke fixture."); return; }
   seen.set(name, pkg.version);
-  await cp(directory, path.join(destination, "node_modules", name), { recursive: true, dereference: true,
-    filter: file => !path.relative(directory, file).split(path.sep).includes("node_modules") });
+  // Node 20 on Windows can supply namespaced paths to fs.cp filters. Compare
+  // both sides in that form so the package root is not mistaken for a nested
+  // node_modules subtree and silently skipped.
+  const root = path.toNamespacedPath(directory);
+  const target = path.join(destination, "node_modules", name);
+  await cp(directory, target, { recursive: true, dereference: true,
+    filter: file => !path.relative(root, path.toNamespacedPath(file)).split(path.sep).includes("node_modules") });
+  assert.equal(JSON.parse(await readFile(path.join(target, "package.json"), "utf8")).name, name);
   for (const child of Object.keys(pkg.dependencies ?? {})) await copyDependencies(child, directory, destination, seen);
 }
 

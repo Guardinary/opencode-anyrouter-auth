@@ -23,6 +23,8 @@ pnpm run check:pack
 
 CI pins pnpm 10.26.0 or a reviewed later version: `pack --dry-run` was [introduced in pnpm 10.26.0](<https://pnpm.io/10.x/cli/pack#--dry-run>), so older CI tool pins cannot run the existing archive fixture. Do not remove the pack gate to work around an unsupported flag.
 
+Offline archive smoke normalizes both source and `fs.cp` filter paths to the same Windows namespaced form and verifies each copied dependency's manifest before import. This prevents Node 20 on Windows from silently filtering out the entire installed package root. The package regression exercises a real copy/import through both path representations.
+
 Run installed Bun and the isolated host gates when the runtime/host contract changes. Validate no private files, local tooling, reference files or gitlinks are tracked. Review the final commit and generated archive, then publish the exact commit via `main` and an immutable version tag.
 
 For this repository, the official discovery topic is `magpie-plugin`. Release notes must distinguish known implementation guarantees, locally executed checks, remote CI results and unverified upstream availability. Do not call configured Node/OS matrix cells passed until GitHub Actions actually reports success.
