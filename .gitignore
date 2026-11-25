@@ -1,0 +1,39 @@
+# Installed dependencies; runtime uses tough-cookie and tests use Node built-ins
+node_modules/
+.pnpm-store/
+
+# Published tarballs and local pack output
+*.tgz
+*.tar.gz
+
+# Local research captures and scratch work, never part of the package.
+# The site bundles are third-party JavaScript and are not redistributed.
+.research-tmp/
+ar-index.js
+live-index.js
+ar-docs.html
+anyrouter-llms.txt
+.tmp/
+.scratch/
+
+# Local secrets and per-user filter rules. content-filter.local.json holds the
+# user's own words and must never be committed; the example file is committed.
+content-filter.local.json
+.env
+.env.*
+!.env.example
+
+# Sandbox HOME / magpie test state
+.sandbox/
+test/.sandbox/
+
+# Editor and OS noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Logs and coverage
+*.log
+coverage/

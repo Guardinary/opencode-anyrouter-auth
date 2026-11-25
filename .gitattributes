@@ -1,0 +1,10 @@
+# Keep source and documentation portable across Windows and Unix.
+*.mjs text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.sh text eol=lf
+*.png binary
+# Historical diff snapshots are evidence bytes, not current source whitespace.
+docs/validation/**/*.diff -text -diff

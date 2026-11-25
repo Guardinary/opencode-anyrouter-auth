@@ -1,0 +1,3423 @@
+diff --git a/lib/account-operations.mjs b/lib/account-operations.mjs
+new file mode 100644
+index 0000000..74fd587
+--- /dev/null
++++ b/lib/account-operations.mjs
+@@ -0,0 +1,108 @@
++import { credentialSnapshot, patchAccountAuth, readAccount } from "./accounts.mjs";
++import { deadlineSignal, throwIfAborted } from "./safety.mjs";
++
++export class AccountChangedError extends Error {
++  constructor() {
++    super("操作期间登录信息已更新或账号已移除；未覆盖新凭据，请重新操作。");
++    this.name = "AccountChangedError";
++    this.code = "anyrouter_account_changed";
++  }
++}
++
++// auth.set replaces the record; it is not cross-process CAS. The queue tracks
++// only this plugin's writes and preserves the latest host-owned record fields.
++export function createAccountOperations({ site, client, timeoutMs = 30000, now = Date.now }) {
++  const queues = new Map();
++  async function run(_action, getAuth, provider, signal, work) {
++    throwIfAborted(signal);
++    const firstAuth = await getAuth();
++    throwIfAborted(signal);
++    const first = readAccount(firstAuth, provider, now());
++    if (!first) throw new AccountChangedError();
++    const intent = credentialSnapshot(firstAuth);
++    const key = `${first.siteURL}:${first.userId || intent}`;
++    let q = queues.get(key);
++    if (!q) {
++      q = { tail: Promise.resolve(), transitions: new Map(), active: 0 };
++      queues.set(key, q);
++    }
++    // Each caller executes against the freshest record. Returning the same
++    // claimed result to two callers would duplicate the displayed reward.
++    const budget = deadlineSignal(signal, timeoutMs);
++    q.active++;
++    const expected = token => {
++      let next = token;
++      const seen = new Set();
++      while (q.transitions.has(next) && !seen.has(next)) {
++        seen.add(next); next = q.transitions.get(next);
++      }
++      return next;
++    };
++    const execute = async () => {
++      let op;
++      try {
++        throwIfAborted(budget.signal);
++        const initialAuth = await getAuth();
++        throwIfAborted(budget.signal);
++        const token = credentialSnapshot(initialAuth);
++        if (token !== expected(intent)) throw new AccountChangedError();
++        const account = readAccount(initialAuth, provider, now());
++        const check = async () => {
++          throwIfAborted(budget.signal);
++          const latest = await getAuth();
++          throwIfAborted(budget.signal);
++          if (credentialSnapshot(latest) !== token) throw new AccountChangedError();
++        };
++        op = site.openSession(account, { signal: budget.signal, beforeMutation: check });
++        let persistenceAttempted = false;
++        const persist = async (patch = {}) => {
++          persistenceAttempted = true;
++          if (!op.safeToPersist()) return false;
++          throwIfAborted(budget.signal);
++          const latest = await getAuth();
++          throwIfAborted(budget.signal);
++          if (credentialSnapshot(latest) !== token) return false;
++          const snapshot = op.snapshot();
++          const latestAccount = readAccount(latest, provider, now());
++          if (!Object.keys(patch).length && JSON.stringify(latestAccount.sessionState) === JSON.stringify(snapshot)) return true;
++          if (typeof client?.auth?.set !== "function") return false;
++          const updated = patchAccountAuth(latest, { sessionState: snapshot, ...patch }, now());
++          throwIfAborted(budget.signal);
++          await client.auth.set({ path: { id: "anyrouter" }, body: updated });
++          const updatedToken = credentialSnapshot(updated);
++          if (updatedToken !== token) q.transitions.set(token, updatedToken);
++          return true;
++        };
++        try {
++          const result = await work({ account, auth: initialAuth, op, persist, check, signal: budget.signal });
++          // An explicit save failure/decline must never cause a second attempt.
++          // Work owns confirmed server outcomes even if local storage is broken.
++          if (!persistenceAttempted) {
++            try { await persist(); } catch {}
++          }
++          return result;
++        } catch (error) {
++          if (!persistenceAttempted && !budget.signal.aborted && op.safeToPersist()) {
++            try { await persist(); } catch {}
++          }
++          throw error;
++        }
++      } finally { op?.close(); }
++    };
++    const pending = q.tail.then(execute, execute);
++    q.tail = pending.catch(() => {});
++    let abort;
++    const cancelled = new Promise((_, reject) => {
++      abort = () => { budget.close(); reject(budget.signal.reason); };
++      budget.signal.addEventListener("abort", abort, { once: true });
++    });
++    // A cancelled waiter returns promptly, but the owned job keeps the queue
++    // ordered until it settles. It cannot abort another waiter's operation.
++    void pending.finally(() => {
++      budget.signal.removeEventListener("abort", abort); budget.close();
++      if (--q.active === 0 && queues.get(key) === q) queues.delete(key);
++    }).catch(() => {});
++    return Promise.race([pending, cancelled]);
++  }
++  return { run };
++}
+diff --git a/.trellis/tasks/11-23-harden-anyrouter/baseline/lib/accounts.mjs b/lib/accounts.mjs
+index 0aca846..ce86618 100644
+--- a/.trellis/tasks/11-23-harden-anyrouter/baseline/lib/accounts.mjs
++++ b/lib/accounts.mjs
+@@ -1,212 +1,154 @@
+-export const PROVIDER = "anyrouter";
+-
+-export const SITES = Object.freeze({
+-  top: "https://anyrouter.top"
+-});
+-
+-export const API_ENDPOINTS = Object.freeze({
+-  top: "https://anyrouter.top"
+-});
++import { createHash, randomUUID } from "node:crypto";
++import { cookieHeader, hasSession, restoreSession, serializeSession } from "./cookies.mjs";
++import { ANYROUTER_ORIGIN, isRecord, positiveId, trustedURL, usableModelKey } from "./safety.mjs";
+ 
+-// A saved account may have no model API key (balance/check-in only). The host
+-// requires a non-empty `access` string for an oauth record, so this placeholder
+-// is stored and never sent to the model gateway.
++export const PROVIDER = "anyrouter";
++export const SITES = Object.freeze({ top: ANYROUTER_ORIGIN });
++export const API_ENDPOINTS = SITES;
+ export const PLACEHOLDER_KEY = "anyrouter";
+-
+-const MODES = new Set([
+-  "api-key",
+-  "access-token",
+-  "password",
+-  "github",
+-  "linuxdo",
+-  "session",
+-  "legacy-session"
+-]);
++const MODES = new Set(["api-key", "access-token", "password", "github", "linuxdo", "session", "legacy-session"]);
+ const CHECKIN_MODES = new Set(["password", "github", "linuxdo", "session", "legacy-session"]);
+-const text = value => typeof value === "string" || typeof value === "number" ? String(value).trim() : "";
+-const emailText = value => /^[^\s@]+@[^\s@]+$/.test(text(value)) ? text(value) : "";
+-const optedIn = value => value === true || value === "true" || value === "yes";
++const text = v => typeof v === "string" || typeof v === "number" ? String(v).trim() : "";
++const emailText = v => /^[^\s@]+@[^\s@]+$/.test(text(v)) ? text(v) : "";
++const optedIn = v => v === true || v === "true" || v === "yes";
+ 
+ export function normalizeBase(value) {
+-  const url = new URL(value);
++  let url;
++  try { url = new URL(value); } catch { throw new Error("端点地址无效"); }
+   if (!["https:", "http:"].includes(url.protocol) || url.username || url.password || url.search || url.hash) {
+     throw new Error("端点必须是不含凭据、查询或片段的 http(s) 基础地址。");
+   }
+   return url.href.replace(/\/+$/, "");
+ }
+-
+ export function siteChoice(value = "top") {
+-  if (!Object.hasOwn(SITES, value)) {
+-    throw new Error("只支持 AnyRouter 官方站点 anyrouter.top。");
+-  }
+-  return value;
+-}
+-
+-export function apiEndpointChoice(value = "top") {
+-  if (!Object.hasOwn(API_ENDPOINTS, value)) {
+-    throw new Error("模型 API 端点只支持 anyrouter.top。");
+-  }
++  if (!Object.hasOwn(SITES, value)) throw new Error("只支持 AnyRouter 官方站点 anyrouter.top。");
+   return value;
+ }
+-
++export function apiEndpointChoice(value = "top") { if (!Object.hasOwn(API_ENDPOINTS, value)) throw new Error("API 端点只支持 anyrouter.top"); return value; }
+ export function protocolBase(base, protocol = "responses") {
+   const normalized = normalizeBase(base);
+   const version = protocol === "gemini" ? "v1beta" : "v1";
+-  if (/\/(?:v1|v1beta)$/.test(normalized)) {
+-    return normalized.replace(/\/(?:v1|v1beta)$/, `/${version}`);
+-  }
+-  return normalized + "/" + version;
++  return /\/(?:v1|v1beta)$/.test(normalized) ? normalized.replace(/\/(?:v1|v1beta)$/, `/${version}`) : `${normalized}/${version}`;
+ }
+-
+ export function normalizeApiBase(value) {
+-  const normalized = normalizeBase(value);
+-  const url = new URL(normalized);
+-  const path = url.pathname.replace(/\/+$/, "");
+-  if (!Object.values(API_ENDPOINTS).includes(url.origin) || !["", "/", "/v1", "/v1beta"].includes(path)) {
+-    throw new Error("模型 API 端点只支持 anyrouter.top。");
+-  }
+-  return protocolBase(normalized);
++  try { trustedURL(value, { base: true }); } catch { throw new Error("API 端点只支持不含凭据的 anyrouter.top/v1 地址"); }
++  return protocolBase(normalizeBase(value));
+ }
+-
+-function legacyValue(auth, key) {
+-  return auth?.[key] ?? auth?.metadata?.[key];
++const legacyValue = (auth, key) => auth?.[key] ?? auth?.metadata?.[key];
++function savedState(auth) {
++  if (auth?.type !== "oauth") return {};
++  let state;
++  try { state = JSON.parse(auth.refresh); } catch {}
++  if (!isRecord(state) || state.provider !== PROVIDER || state.schema !== 2 || !MODES.has(state.mode)) {
++    throw new Error("无法识别的 AnyRouter 账号格式，请重新连接该账号。");
++  }
++  return state;
+ }
+ 
+-export function readAccount(auth, provider = {}) {
++export function readAccount(auth, provider = {}, now = Date.now()) {
+   if (!auth) return null;
+-  let saved;
+-  if (auth.type === "oauth") {
+-    try {
+-      saved = JSON.parse(auth.refresh);
+-    } catch {}
+-    if (saved?.provider !== PROVIDER || saved?.schema !== 2 || !MODES.has(saved.mode)) {
+-      throw new Error("无法识别的 AnyRouter 账号格式，请重新连接该账号。");
+-    }
+-  }
+-
+-  const get = key => saved ? saved[key] : legacyValue(auth, key);
++  if (!["api", "oauth"].includes(auth.type)) throw new Error("不支持的 AnyRouter 认证类型");
++  const saved = savedState(auth);
++  const get = key => auth.type === "oauth" ? saved[key] : legacyValue(auth, key);
+   const username = text(get("username"));
+-  const password = typeof get("password") === "string" ? get("password") : "";
+-  const session = text(get("session") || get("cookie"));
++  const pass = typeof get("password") === "string" ? get("password") : "";
++  const rawSession = text(get("session") || get("cookie"));
+   const accessToken = text(get("accessToken"));
+-  const mode = saved?.mode ?? (username && password ? "password" : accessToken ? "access-token" : session ? "legacy-session" : "api-key");
++  const mode = saved.mode ?? (username && pass ? "password" : accessToken ? "access-token" : rawSession || get("sessionState") ? "legacy-session" : "api-key");
+   const site = siteChoice(text(get("site") || provider.site) || "top");
+   const siteURL = normalizeBase(text(get("siteURL") || provider.siteURL) || SITES[site]);
+-  if (siteURL !== SITES.top) {
+-    throw new Error("AnyRouter 登录和站点接口只支持 anyrouter.top，请重新连接该账号。");
+-  }
+-  const legacyEndpoint = text(get("endpoint") || provider.endpoint);
+-  const explicitBase = text(get("apiBase"));
+-  const endpointChoice = text(get("apiEndpoint"));
+-  const apiBase = explicitBase || legacyEndpoint
+-    ? normalizeApiBase(explicitBase || legacyEndpoint)
+-    : endpointChoice ? protocolBase(API_ENDPOINTS[apiEndpointChoice(endpointChoice)]) : "";
+-  const userId = text(get("userId"));
+-  const email = emailText(get("email"));
+-  const savedKey = text(saved ? auth.access : auth.key);
+-  const key = savedKey === PLACEHOLDER_KEY ? "" : savedKey;
+-  const hasModelKey = saved?.hasModelKey === false ? false : Boolean(key);
++  if (siteURL !== ANYROUTER_ORIGIN) throw new Error("AnyRouter 登录和站点接口只支持 anyrouter.top，请重新连接该账号。");
++  const apiBase = get("apiBase") || get("endpoint") || provider.endpoint;
++  const endpoint = text(get("apiEndpoint"));
++  const key = text(auth.type === "oauth" ? auth.access : auth.key);
+   const checkinEnabled = CHECKIN_MODES.has(mode) && optedIn(get("checkinEnabled"));
+-
+-  return {
+-    schema: 2,
+-    provider: PROVIDER,
+-    mode,
+-    site,
+-    siteURL,
+-    apiBase,
+-    key,
+-    hasModelKey,
+-    keyId: text(get("keyId")),
+-    userId,
+-    username,
+-    email,
+-    label: text(get("label")) || (!saved && !email ? text(get("email")) : ""),
+-    session: mode === "api-key" ? "" : session,
++  const account = {
++    ...saved, schema: 2, provider: PROVIDER, mode, site, siteURL,
++    apiBase: apiBase ? normalizeApiBase(apiBase) : endpoint ? protocolBase(API_ENDPOINTS[apiEndpointChoice(endpoint)]) : "",
++    key: key === PLACEHOLDER_KEY ? "" : key,
++    hasModelKey: saved.hasModelKey !== false && usableModelKey(key),
++    keyId: text(get("keyId")), userId: text(get("userId")), username,
++    email: emailText(get("email")), label: text(get("label")) || (!saved.mode && !emailText(get("email")) ? text(get("email")) : ""),
++    session: mode === "api-key" ? "" : rawSession,
++    sessionState: mode === "api-key" ? undefined : get("sessionState"),
+     accessToken: mode === "api-key" ? "" : accessToken,
+-    headers: get("headers") ?? "",
+-    siteHeaders: get("siteHeaders") ?? "",
+-    checkinEnabled,
+-    password: mode === "password" && checkinEnabled ? password : "",
+-    lastCheckinDay: text(get("lastCheckinDay")),
+-    lastCheckin: get("lastCheckin") ?? null
++    headers: get("headers") ?? "", siteHeaders: get("siteHeaders") ?? "",
++    retryAfterSeconds: get("retryAfterSeconds"),
++    checkinEnabled, password: mode === "password" && checkinEnabled ? pass : "",
++    loginGeneration: text(get("loginGeneration")),
++    lastCheckinDay: text(get("lastCheckinDay")), lastCheckin: get("lastCheckin") ?? null,
+   };
++  if (account.sessionState !== undefined) {
++    // Convenience header is computed in memory only; the serialized jar remains
++    // authoritative and raw Cookie values are never duplicated in persistence.
++    account.session = cookieHeader(restoreSession(account, now), `${siteURL}/api/user/self`, now);
++  }
++  if (mode !== "api-key" && !positiveId(account.userId)) throw new Error("站点用户 ID 无效，请重新连接该账号");
++  return account;
+ }
+ 
+-export function accountCapabilities(account) {
++export function accountCapabilities(account, now = Date.now()) {
++  const session = account && hasSession(account, now);
+   const mode = account?.mode;
+-  const siteCredential = Boolean(account?.session) ||
+-    (mode === "password" && Boolean(account?.username && account?.password));
+   return {
+-    inference: Boolean(account?.hasModelKey && account?.key),
+-    usage: Boolean(account && mode !== "api-key" && account.userId && (account.session || account.accessToken)),
+-    checkin: Boolean(CHECKIN_MODES.has(mode) && account.userId && siteCredential)
++    inference: !!(account?.hasModelKey && usableModelKey(account.key)),
++    usage: !!(account && mode !== "api-key" && positiveId(account.userId) && (session || account.accessToken)),
++    checkin: !!(CHECKIN_MODES.has(mode) && positiveId(account?.userId) && (session || mode === "password" && account?.username && account?.password)),
+   };
+ }
+ 
+-export function saveAccount(account, previous = {}) {
+-  if (!MODES.has(account.mode)) {
+-    throw new Error("无法识别的 AnyRouter 账号模式。");
+-  }
+-  const hasModelKey = Boolean(account.key && account.key !== PLACEHOLDER_KEY);
+-  if (account.mode === "api-key" && !hasModelKey) {
+-    throw new Error("模型 API Key 账号必须有推理 key。");
+-  }
+-  if (account.mode !== "api-key" && !account.userId) {
+-    throw new Error("站点没有提供账号 ID。");
+-  }
+-
+-  const { key: _key, ...state } = account;
+-  state.schema = 2;
+-  state.provider = PROVIDER;
+-  state.hasModelKey = hasModelKey;
+-  state.checkinEnabled = CHECKIN_MODES.has(account.mode) && account.checkinEnabled === true;
+-  if (!state.checkinEnabled || account.mode !== "password") {
+-    delete state.password;
+-  }
+-  if (account.mode === "api-key") {
+-    delete state.session;
+-    delete state.accessToken;
+-    delete state.password;
++export function saveAccount(account, previous = {}, now = Date.now()) {
++  if (!MODES.has(account.mode)) throw new Error("无法识别的 AnyRouter 账号模式。");
++  const hasModelKey = usableModelKey(account.key);
++  if (account.mode === "api-key" && !hasModelKey) throw new Error("模型 API Key 账号必须有推理 key。");
++  if (account.mode !== "api-key" && !positiveId(account.userId)) throw new Error("站点没有提供有效账号 ID。");
++  const old = previous.type === "oauth" ? savedState(previous) : {};
++  const state = { ...old, ...account, schema: 2, provider: PROVIDER, hasModelKey,
++    loginGeneration: account.loginGeneration || old.loginGeneration || randomUUID(),
++    checkinEnabled: CHECKIN_MODES.has(account.mode) && account.checkinEnabled === true };
++  delete state.key;
++  if (account.mode !== "api-key") state.sessionState = serializeSession(restoreSession(account, now), now);
++  else { delete state.sessionState; delete state.accessToken; }
++  for (const name of ["session", "cookie", "cookies"]) delete state[name];
++  if (!state.checkinEnabled || account.mode !== "password") delete state.password;
++  const result = { ...previous, type: "oauth", access: hasModelKey ? account.key : PLACEHOLDER_KEY,
++    refresh: JSON.stringify(state), expires: 0,
++    accountId: text(previous.accountId ?? previous.metadata?.email ?? previous.email) || emailText(account.email) || text(account.username) || `AnyRouter ${account.userId}`,
++    ...(account.userId ? { uid: `${PROVIDER}:${account.userId}` } : {}) };
++  // Known legacy credential aliases must not leave duplicate secrets outside refresh.
++  for (const name of ["key", "session", "cookie", "cookies", "sessionState", "accessToken", "password", "loginGeneration"]) delete result[name];
++  if (isRecord(result.metadata)) {
++    result.metadata = { ...result.metadata };
++    for (const name of ["session", "cookie", "cookies", "sessionState", "accessToken", "password", "loginGeneration"]) delete result.metadata[name];
+   }
++  return result;
++}
+ 
+-  return {
+-    type: "oauth",
+-    access: hasModelKey ? account.key : PLACEHOLDER_KEY,
+-    refresh: JSON.stringify(state),
+-    expires: 0,
+-    accountId: text(previous.accountId ?? previous.metadata?.email ?? previous.email) ||
+-      emailText(account.email) || text(account.username) || `AnyRouter ${text(account.userId)}`.trim(),
+-    ...(account.userId ? { uid: `${PROVIDER}:${account.userId}` } : {})
+-  };
++// Updates only fields owned by the site operation; unrelated host and refresh
++// fields always come from the latest raw auth, never from the old operation.
++export function patchAccountAuth(latest, patch, now = Date.now()) {
++  const account = readAccount(latest, {}, now);
++  if (!account) throw new Error("账号已移除");
++  const allowed = new Set(["sessionState", "lastCheckinDay", "lastCheckin", "username", "email"]);
++  for (const name of Object.keys(patch)) if (!allowed.has(name)) throw new Error("不允许的账号状态修改");
++  return saveAccount({ ...account, ...patch }, latest, now);
+ }
+ 
++export function credentialSnapshot(auth) {
++  if (!auth) return "logged-out";
++  // Full refresh captures credential/settings changes while outer host-only
++  // changes remain preservable by patchAccountAuth. Hashes never contain secrets.
++  const legacy = Object.fromEntries(["site", "siteURL", "userId", "endpoint", "apiBase", "apiEndpoint", "session", "cookie", "sessionState", "accessToken", "password", "headers", "checkinEnabled", "loginGeneration"].map(k => [k, legacyValue(auth, k)]));
++  return createHash("sha256").update(JSON.stringify([auth.type, auth.key, auth.access, auth.refresh, legacy])).digest("hex");
++}
+ export function withSiteIdentity(account, user) {
+   const userId = assertSameUser(account, user);
+-  return {
+-    ...account,
+-    userId,
+-    username: text(user.username ?? account.username),
+-    email: emailText(user.email ?? account.email)
+-  };
++  return { ...account, userId, username: text(user.username ?? account.username), email: emailText(user.email ?? account.email) };
+ }
+-
+ export function assertSameUser(account, user) {
+-  const id = text(user?.id);
+-  if (!id || (account?.userId && id !== account.userId)) {
+-    throw new Error("站点返回的用户 ID 不一致或缺失，未替换账号凭据。");
+-  }
++  const id = positiveId(user?.id);
++  if (!id || account?.userId && id !== account.userId) throw new Error("站点返回的用户 ID 不一致或缺失，未替换账号凭据。");
+   return id;
+ }
+-
+-export function beijingDay(now = Date.now()) {
+-  return new Date(now + 8 * 60 * 60 * 1000).toISOString().slice(0, 10);
+-}
+-
+-export function isKnownSite(value) {
+-  try {
+-    return Object.values(SITES).includes(new URL(value).origin);
+-  } catch {
+-    return false;
+-  }
+-}
++export function beijingDay(now = Date.now()) { return new Date(now + 8 * 3600000).toISOString().slice(0, 10); }
++export function isKnownSite(value) { try { return trustedURL(value).origin === ANYROUTER_ORIGIN; } catch { return false; } }
+diff --git a/.trellis/tasks/11-23-harden-anyrouter/baseline/lib/catalog.mjs b/lib/catalog.mjs
+index 8451bae..35eb409 100644
+--- a/.trellis/tasks/11-23-harden-anyrouter/baseline/lib/catalog.mjs
++++ b/lib/catalog.mjs
+@@ -1,149 +1,82 @@
+-import { API_ENDPOINTS, SITES, protocolBase } from "./accounts.mjs";
+ import { inferenceHeaders } from "./headers.mjs";
+ import { readBoundedText } from "./site-client.mjs";
+ import { resolveModelMetadata } from "./model-metadata.mjs";
+ import { createModelRegistry } from "./model-registry.mjs";
+ import { declaredModels } from "./declared-models.mjs";
++import { ANYROUTER_ORIGIN, deadlineSignal, isRecord, throwIfAborted, trustedURL, usableModelKey } from "./safety.mjs";
+ export { protocolOfURL } from "./protocols.mjs";
+-
+-export const NPMS = Object.freeze({ responses: "@ai-sdk/openai", chat: "@ai-sdk/openai-compatible", anthropic: "@ai-sdk/anthropic", gemini: "@ai-sdk/google" });
+-
+-function fromNpm(npm) {
+-  if (/anthropic/.test(npm ?? "")) return "anthropic";
+-  if (npm === "@ai-sdk/google") return "gemini";
+-  if (["@ai-sdk/openai", "@ai-sdk/azure"].includes(npm)) return "responses";
+-  return "chat";
++export const NPMS=Object.freeze({responses:"@ai-sdk/openai",chat:"@ai-sdk/openai-compatible",anthropic:"@ai-sdk/anthropic",gemini:"@ai-sdk/google"});
++const validId = id => typeof id === "string" && /^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,255}$/.test(id) && !["constructor","prototype","__proto__"].includes(id);
++export function protocolForModel(id) {return /^claude-|cc-format$/i.test(id??"")?"anthropic":"responses";}
++const fromNpm = npm => /anthropic/.test(npm)?"anthropic":npm==="@ai-sdk/google"?"gemini":["@ai-sdk/openai","@ai-sdk/azure"].includes(npm)?"responses":"chat";
++function protocolChoice(row,user) {
++  if(user.provider?.npm)return {protocol:fromNpm(user.provider.npm),npm:user.provider.npm};
++  const types=Array.isArray(row.supported_endpoint_types)?row.supported_endpoint_types:[];
++  const family=protocolForModel(row.id);
++  const protocol=types.includes(family)?family:types.includes("anthropic")?"anthropic":types.some(t=>["responses","openai-response","openai-responses","openai","gemini","google"].includes(t))?"responses":family;
++  return {protocol,npm:NPMS[protocol]};
+ }
+-
+-export function protocolForModel(id) {
+-  const value = String(id || "").toLowerCase();
+-  if (value.startsWith("claude-") || value.endsWith("-cc-format")) return "anthropic";
+-  // AnyRouter exposes Gemini through its OpenAI Responses gateway, not the
+-  // Gemini native API (chat completions and the Google route are not exposed).
+-  return "responses";
++function modelBase(user,account,explicit) {
++  const base=user.provider?.api||account?.apiBase||explicit.api||`${ANYROUTER_ORIGIN}/v1`;
++  const url=trustedURL(base,{base:true});
++  return /\/v1\/?$/.test(url.pathname)?url.href.replace(/\/+$/,""):`${ANYROUTER_ORIGIN}/v1`;
+ }
+-
+-function chooseProtocol(row, user, providerConfig, baseNpm) {
+-  const npm = user?.provider?.npm || baseNpm;
+-  if (npm) return fromNpm(npm);
+-  const types = Array.isArray(row.supported_endpoint_types) ? row.supported_endpoint_types : [];
+-  if (types.includes("anthropic")) return "anthropic";
+-  if (types.some(value => ["responses", "openai-response", "openai-responses", "gemini", "google"].includes(value))) return "responses";
+-  return protocolForModel(row.id);
+-}
+-
+-function isOfficialBase(value) {
+-  try {
+-    const url = new URL(value);
+-    const path = url.pathname.replace(/\/+$/, "");
+-    return [...Object.values(SITES), ...Object.values(API_ENDPOINTS)].includes(url.origin) &&
+-      ["", "/", "/v1", "/v1beta"].includes(path);
+-  } catch {
+-    return false;
+-  }
+-}
+-
+-function modelBase(value, account, protocol) {
+-  if (!value) return account.apiBase ? protocolBase(account.apiBase, protocol) : protocolBase(account.siteURL, protocol);
+-  if (isOfficialBase(value)) return protocolBase(value, protocol);
+-  return value;
+-}
+-
+-export function buildCatalog(rows, provider, account, explicit = {}, pricing = [], registry = {}) {
+-  const meta = new Map(pricing.filter(row => row && typeof row.model_name === "string").map(row => [row.model_name, row]));
+-  const out = Object.create(null);
+-  const discovered = new Set(rows.map(row => row?.id));
+-  const manual = Object.entries(explicit.models ?? {}).filter(([name, model]) => !model.disabled && !discovered.has(model.id || name))
+-    .map(([name, model]) => ({ id: model.id || name }));
+-  // A user declaration is an explicit override; a public price-list entry is
+-  // not. Never silently remove a manually configured model on catalog refresh.
+-  for (const row of [...rows, ...manual]) {
+-    if (typeof row?.id !== "string" || !row.id) continue;
+-    const aliases = Object.entries(explicit.models ?? {}).filter(([name, model]) => (model.id || name) === row.id);
+-    const names = aliases.length ? aliases : [[row.id, {}]];
+-    for (const [name, user] of names) {
+-      if (user.disabled) continue;
+-      const base = provider.models?.[name] ?? provider.models?.[row.id] ?? {};
+-      const metadata = { ...meta.get(row.id), ...row };
+-      // The host hands every model back with the provider's own SDK filled in,
+-      // so `base.api.npm` is the provider default (Anthropic here), not a
+-      // per-model declaration. The plugin's declared table is the authority.
+-      const declared = declaredModels()[row.id];
+-      const baseNpm = declared?.api?.npm || (base.api?.npm !== explicit.npm ? base.api?.npm : undefined) || base.provider?.npm;
+-      const protocol = chooseProtocol(metadata, user, explicit, baseNpm);
+-      const explicitModelBase = user.provider?.api || account.apiBase;
+-      const url = explicitModelBase
+-        ? modelBase(explicitModelBase, account, protocol)
+-        : modelBase(explicit.api, account, protocol);
+-      // A model's own declared SDK (e.g. GPT/Gemini -> Responses) outranks the
+-      // provider default, which is Anthropic for AnyRouter's Claude models.
+-      const npm = user.provider?.npm || declared?.api?.npm ||
+-        (base.api?.npm && base.api.npm !== explicit.npm ? base.api.npm : undefined) ||
+-        (explicit.npm && explicit.npm !== NPMS.responses ? explicit.npm : NPMS[protocol]);
+-      out[name] = {
+-        ...base, id: name, name: user.name || row.name || row.display_name || base.name || name,
+-        api: { id: row.id, url, npm },
+-        ...resolveModelMetadata({ id: row.id, providerId: provider.id || "anyrouter", registry, user, row, pricing: meta.get(row.id), base }),
+-        headers: { ...base.headers, ...user.headers },
+-        options: { ...base.options, ...user.options },
+-        ...(Array.isArray(metadata.supported_endpoint_types) ? { endpoints: metadata.supported_endpoint_types } : {})
+-      };
++export function buildCatalog(rows,provider={},account={},explicit={},pricing=[],registry={}) {
++  const out=Object.create(null),declared=declaredModels();
++  const meta=new Map(pricing.filter(r=>isRecord(r)&&validId(r.model_name)).map(r=>[r.model_name,r]));
++  for(const row of rows) {
++    if(!isRecord(row)||!validId(row.id))continue;
++    const aliases=Object.entries(explicit.models??{}).filter(([name,m])=>isRecord(m)&&(m.id||name)===row.id);
++    for(const [name,user] of aliases.length?aliases:[[row.id,{}]]) {
++      if(!validId(name)||user.disabled)continue;
++      const original=declared[row.id]??{};
++      // Host-filled API/capabilities are not evidence of explicit declarations.
++      // Use our own model metadata as fallback; retain genuine host limit/options
++      // only for an unknown model that has no corresponding plugin declaration.
++      const base=Object.hasOwn(declared,row.id)?original:(provider.models?.[name]??provider.models?.[row.id]??{});
++      const choice=protocolChoice(row,user), url=modelBase(user,account,explicit);
++      const metadata=resolveModelMetadata({id:row.id,providerId:provider.id||"anyrouter",registry,user,row,pricing:meta.get(row.id),base});
++      // Unknown models cannot inherit a false reasoning/image claim from the
++      // provider-wide placeholder schema; authenticated flags/registry may fill it.
++      out[name]={id:name,providerID:provider.id||"anyrouter",name:user.name||row.name||row.display_name||base.name||name,
++        api:{id:row.id,url,npm:choice.npm},...metadata,
++        headers:{...base.headers,...user.headers},options:{...base.options,...user.options},
++        ...(Array.isArray(row.supported_endpoint_types)?{endpoints:[...row.supported_endpoint_types]}:{})};
+     }
+   }
+   return out;
+ }
+-
+-export function createCatalog({ site, explicit, compatibility, fetchImpl = (...args) => fetch(...args), loadRegistry = createModelRegistry({ fetchImpl }) }) {
+-  // The fallback is the plugin's own declared list, shaped like the host's
+-  // model objects: every model needs an explicit `api` because the provider
+-  // default (Anthropic) must not swallow GPT/Gemini's Responses protocol.
+-  const fallback = (provider, failed = false) => {
+-    const explicitModels = explicit().models ?? {};
+-    const ids = new Set([...Object.keys(provider.models ?? {}), ...Object.keys(explicitModels)]);
+-    const models = Object.fromEntries([...ids].filter(id => !explicitModels[id]?.disabled && provider.models?.[id]).map(id => {
+-      const user = explicitModels[id] ?? {}, base = provider.models[id];
+-      const protocol = chooseProtocol({ id }, user, explicit(), base.api?.npm);
+-      const url = base.api?.url || protocolBase(SITES.top, protocol);
+-      return [id, {
+-        ...base,
+-        api: { id: user.id || base.api?.id || id, url, npm: user.provider?.npm || base.api?.npm || NPMS[protocol] },
+-        ...resolveModelMetadata({ id: user.id || id, providerId: provider.id || "anyrouter", user, base }),
+-      }];
+-    }));
+-    if (failed) models[Symbol.for("magpie.fellBack")] = true;
++export function createCatalog({site,explicit=()=>({}),compatibility=()=>true,fetchImpl=(...args)=>fetch(...args),loadRegistry=createModelRegistry({fetchImpl})}) {
++  function fallback(provider,account,failed=false) {
++    const settings=explicit(), rows=Object.keys(declaredModels()).map(id=>({id}));
++    for(const [name,m]of Object.entries(settings.models??{}))if(isRecord(m)&&validId(m.id||name)&&!rows.some(r=>r.id===(m.id||name)))rows.push({id:m.id||name});
++    const models=buildCatalog(rows,{id:provider?.id||"anyrouter",models:{}},account??{},settings);
++    if(failed)models[Symbol.for("magpie.fellBack")]=true;
+     return models;
+-  };
+-  return async (provider, account) => {
+-    if (!account?.hasModelKey || !account?.key) return fallback(provider);
+-    const settings = explicit();
++  }
++  return async(provider={},account,{signal}={})=>{
++    throwIfAborted(signal);
++    if(!account)return fallback(provider,null);
++    if(!account.hasModelKey||!usableModelKey(account.key))return{};
++    const budget=deadlineSignal(signal,25000);
+     try {
+-      const generatedSiteDefault = settings.api && isOfficialBase(settings.api);
+-      const base = account.apiBase || (generatedSiteDefault ? protocolBase(settings.api) : settings.api) ||
+-        protocolBase(account.siteURL);
+-      const headers = inferenceHeaders(account, settings.headers, "responses", compatibility());
+-      const response = await fetchImpl(base + "/models", { headers, redirect: "error", signal: AbortSignal.timeout(25000) });
+-      const text = await readBoundedText(response);
+-      let value;
+-      try { value = JSON.parse(text); } catch {}
+-      if (response.status === 401) {
+-        const clientRejected = /unauthorized client detected/i.test(value?.error?.message || value?.message || "") && value?.error?.code !== "invalid_api_key";
+-        throw Object.assign(new Error(clientRejected ? "The gateway rejected the client headers, not necessarily the API key." : "The model API rejected the inference key. Reconnect this account."), { signIn: clientRejected ? "kept" : "expired" });
++      const settings=explicit(),base=modelBase({},account,settings);
++      const response=await fetchImpl(trustedURL(`${base}/models`,{model:true}).href,{headers:inferenceHeaders(account,settings.headers,"responses",compatibility()),redirect:"manual",signal:budget.signal});
++      const text=await readBoundedText(response,2*1024*1024,{signal:budget.signal,timeoutMs:25000});
++      let value;try{value=JSON.parse(text);}catch{}
++      if(response.status===401&&isRecord(value)) {
++        const message=typeof value.error==="string"?value.error:value.error?.message??value.message??"";
++        const rejected=/unauthorized client detected|invalid (?:claude code|codex) request/i.test(message);
++        throw Object.assign(new Error(rejected?"网关拒绝客户端标识，模型 Key 未被判定失效":"模型接口拒绝了 API Key，请重新连接账号"),{signIn:rejected?"kept":"expired"});
+       }
+-      if (!response.ok) return fallback(provider, true);
+-      if (!Array.isArray(value?.data)) return fallback(provider, true);
+-      const publicMetadata = (async () => {
+-        if (!value.data.length) return [];
+-        try {
+-          const result = await site.request(account, "/api/pricing", { anonymous: true, signal: AbortSignal.timeout(5000), operation: "public model metadata read" });
+-          if (Array.isArray(result.data)) return result.data;
+-        } catch {}
+-        return [];
++      if(!response.ok||!Array.isArray(value?.data)||value.data.some(r=>!isRecord(r)||!validId(r.id)))return fallback(provider,account,true);
++      if(!value.data.length)return{}; // A successful empty list is authoritative.
++      const pricing=(async()=>{
++        try{const r=await site.request({siteURL:ANYROUTER_ORIGIN,session:"",headers:""},"/api/pricing",{anonymous:true,signal:budget.signal});return Array.isArray(r.data)?r.data:[];}catch{throwIfAborted(budget.signal);return[];}
+       })();
+-      const [pricing, registry] = await Promise.all([publicMetadata, loadRegistry()]);
+-      return buildCatalog(value.data, provider, account, settings, pricing, registry);
+-    } catch (error) {
+-      if (error.signIn) throw error;
+-      return fallback(provider, true);
+-    }
++      const [prices,registry]=await Promise.all([pricing,loadRegistry({signal:budget.signal})]);throwIfAborted(budget.signal);
++      return buildCatalog(value.data,provider,account,settings,prices,registry);
++    }catch(error){throwIfAborted(budget.signal);if(error.signIn)throw error;return fallback(provider,account,true);}
++    finally{budget.close();}
+   };
+ }
+diff --git a/lib/cookies.mjs b/lib/cookies.mjs
+new file mode 100644
+index 0000000..d0523c6
+--- /dev/null
++++ b/lib/cookies.mjs
+@@ -0,0 +1,118 @@
++import { Cookie, CookieJar } from "tough-cookie";
++import { ANYROUTER_ORIGIN, isRecord, trustedURL } from "./safety.mjs";
++
++const MAX_STATE_BYTES = 128 * 1024;
++const MAX_COOKIES = 256;
++const COOKIE_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
++const COOKIE_VALUE = /^[\x21\x23-\x2b\x2d-\x3a\x3c-\x5b\x5d-\x7e]*$/;
++const invalid = () => new Error("保存的 Cookie 状态或导入格式无效，请重新导入本站会话");
++const freshJar = () => new CookieJar(undefined, { prefixSecurity: "strict", allowSpecialUseDomain: false });
++
++// Freeze Max-Age at receipt time. tough-cookie uses lastAccessed as its relative
++// anchor; normalizing to Expires prevents reads/restarts from extending lifetime.
++function absoluteExpiry(cookie, receivedAt) {
++  if (cookie.maxAge != null) {
++    if (cookie.maxAge === "Infinity") cookie.expires = "Infinity";
++    else cookie.expires = new Date(Number(cookie.maxAge) <= 0 ? 0 : receivedAt + Number(cookie.maxAge) * 1000);
++    cookie.maxAge = null;
++  }
++  return cookie;
++}
++
++export function importCookieHeader(raw, origin = ANYROUTER_ORIGIN, now = Date.now()) {
++  trustedURL(origin);
++  if (origin !== ANYROUTER_ORIGIN || typeof raw !== "string" || Buffer.byteLength(raw) > MAX_STATE_BYTES || /[\r\n]/.test(raw)) throw invalid();
++  const jar = freshJar();
++  const parts = raw.trim().replace(/^Cookie:\s*/i, "").split(";").map(v => v.trim()).filter(Boolean);
++  if (parts.length > MAX_COOKIES) throw invalid();
++  for (const pair of parts) {
++    const at = pair.indexOf("=");
++    const key = pair.slice(0, at), value = pair.slice(at + 1);
++    if (at < 1 || !COOKIE_NAME.test(key) || !COOKIE_VALUE.test(value)) throw invalid();
++    const c = Cookie.parse(pair);
++    if (!c) throw invalid();
++    c.path = "/"; c.secure = true;
++    jar.setCookieSync(c, `${origin}/`, { now: new Date(now) });
++  }
++  return jar;
++}
++
++export function restoreSession(account = {}, now = Date.now()) {
++  const origin = account.siteURL ?? ANYROUTER_ORIGIN;
++  if (origin !== ANYROUTER_ORIGIN) throw invalid();
++  if (account.sessionState !== undefined) {
++    const state = account.sessionState;
++    if (!isRecord(state) || state.version !== 1 || state.origin !== origin || !isRecord(state.jar) ||
++        !Array.isArray(state.jar.cookies) || state.jar.cookies.length > MAX_COOKIES || Buffer.byteLength(JSON.stringify(state)) > MAX_STATE_BYTES) throw invalid();
++    const jar = freshJar();
++    for (const raw of state.jar.cookies) {
++      if (!isRecord(raw) || raw.domain !== "anyrouter.top" || typeof raw.path !== "string" || !raw.path.startsWith("/") ||
++          typeof raw.key !== "string" || !COOKIE_NAME.test(raw.key) || typeof raw.value !== "string" || !COOKIE_VALUE.test(raw.value)) throw invalid();
++      for (const field of ["expires", "creation", "lastAccessed"]) {
++        const value = raw[field];
++        if (value !== undefined && !(field === "expires" && value === "Infinity") &&
++            (!(typeof value === "string" || typeof value === "number") || !Number.isFinite(new Date(value).getTime()))) throw invalid();
++      }
++      if (raw.maxAge !== undefined && raw.maxAge !== null && raw.maxAge !== "Infinity" && raw.maxAge !== "-Infinity" &&
++          !Number.isSafeInteger(raw.maxAge)) throw invalid();
++      const c = Cookie.fromJSON(raw);
++      if (!c) throw invalid();
++      const anchor = c.lastAccessed?.getTime() ?? c.creation?.getTime() ?? now;
++      absoluteExpiry(c, anchor);
++      // Setting into a fresh trusted jar rechecks prefixes, domain and path.
++      // A persisted host-only cookie has a domain for storage, not a Domain
++      // attribute; clear it before prefix validation (__Host-* forbids Domain).
++      if (raw.hostOnly === true) c.domain = undefined;
++      jar.setCookieSync(c, `${origin}${c.path}`, { now: c.creation ?? new Date(now) });
++    }
++    return jar;
++  }
++  return importCookieHeader(account.session ?? account.cookie ?? "", origin, now);
++}
++
++export function cookieHeader(jar, url, now = Date.now()) {
++  trustedURL(url);
++  return jar.getCookiesSync(url, { expire: false, sameSiteContext: "strict" })
++    .filter(c => (c.expiryTime() ?? Infinity) > now).map(c => c.cookieString()).join("; ");
++}
++
++export function hasSession(account, now = Date.now(), url = `${ANYROUTER_ORIGIN}/api/user/self`) {
++  try {
++    trustedURL(url);
++    const jar = restoreSession(account, now);
++    return jar.getCookiesSync(url, { expire: false, sameSiteContext: "strict" })
++      .some(c => c.key === "session" && c.value && (c.expiryTime() ?? Infinity) > now);
++  } catch { return false; }
++}
++
++export function applySetCookies(jar, headers, url, now = Date.now()) {
++  trustedURL(url);
++  const separate = headers?.getSetCookie?.() ?? [];
++  const lines = separate.length ? separate : (headers?.get?.("set-cookie") ?? "").split(/,(?=\s*[^;,=\s]+=)/);
++  for (const line of lines) {
++    if (Buffer.byteLength(String(line)) > 8192) continue;
++    const c = Cookie.parse(String(line));
++    if (!c || !COOKIE_NAME.test(c.key) || !COOKIE_VALUE.test(c.value)) continue;
++    absoluteExpiry(c, now);
++    try { jar.setCookieSync(c, url, { now: new Date(now) }); } catch { /* Ignore invalid/foreign server cookies, never log their values. */ }
++  }
++  const state = jar.serializeSync();
++  if (state.cookies.length > MAX_COOKIES || Buffer.byteLength(JSON.stringify(state)) > MAX_STATE_BYTES) throw invalid();
++}
++
++export function serializeSession(jar, now = Date.now()) {
++  const state = jar.serializeSync();
++  state.cookies = state.cookies.filter(raw => {
++    const c = Cookie.fromJSON(raw); return c && (c.expiryTime() ?? Infinity) > now;
++  }).map(raw => { const copy = { ...raw }; delete copy.lastAccessed; return copy; });
++  state.cookies.sort((a, b) => `${a.domain}\n${a.path}\n${a.key}`.localeCompare(`${b.domain}\n${b.path}\n${b.key}`));
++  return { version: 1, origin: ANYROUTER_ORIGIN, jar: state };
++}
++
++// Compatibility helper for integrations that need only the current header.
++// Persistence must use serializeSession so expiry and scope are not discarded.
++export function mergeCookies(previous, headers, url = `${ANYROUTER_ORIGIN}/api/user/self`) {
++  const jar = importCookieHeader(previous ?? "");
++  applySetCookies(jar, headers, url);
++  return cookieHeader(jar, url);
++}
+diff --git a/.trellis/tasks/11-23-harden-anyrouter/baseline/lib/declared-models.mjs b/lib/declared-models.mjs
+index 2387bac..20c5711 100644
+--- a/.trellis/tasks/11-23-harden-anyrouter/baseline/lib/declared-models.mjs
++++ b/lib/declared-models.mjs
+@@ -13,6 +13,7 @@ export const MODEL_SHAPE = {
+     toolcall: true,
+     attachment: true,
+     input: { text: true, image: true },
++    output: { text: true },
+   },
+ };
+ 
+@@ -106,10 +107,28 @@ export function declaredModels() {
+         ...MODEL_SHAPE.capabilities,
+         ...(model.capabilities ?? {}),
+         input: { ...MODEL_SHAPE.capabilities.input, ...(model.capabilities?.input ?? {}) },
++        output: { ...MODEL_SHAPE.capabilities.output, ...(model.capabilities?.output ?? {}) },
+       },
+     };
+   }
+   return out;
+ }
+ 
++// Configuration and runtime model objects have different schemas in magpie.
++// Do not feed a runtime api/capabilities object into config(): the host ignores it.
++export function declaredConfigModels() {
++  const out = {};
++  for (const [id, model] of Object.entries(declaredModels())) {
++    const cap = model.capabilities;
++    out[id] = {
++      name: model.name,
++      provider: { npm: model.api?.npm ?? "@ai-sdk/anthropic", api: "https://anyrouter.top/v1" },
++      limit: { ...model.limit }, reasoning: cap.reasoning, attachment: cap.attachment,
++      tool_call: cap.toolcall,
++      modalities: { input: Object.keys(cap.input).filter(k => cap.input[k]), output: ["text"] },
++    };
++  }
++  return out;
++}
++
+ export const DECLARED_MODEL_IDS = Object.freeze(Object.keys(MODELS));
+diff --git a/.trellis/tasks/11-23-harden-anyrouter/baseline/lib/model-registry.mjs b/lib/model-registry.mjs
+index 54caa3f..962983c 100644
+--- a/.trellis/tasks/11-23-harden-anyrouter/baseline/lib/model-registry.mjs
++++ b/lib/model-registry.mjs
+@@ -2,6 +2,7 @@ import { open } from "node:fs/promises";
+ import { homedir } from "node:os";
+ import { join } from "node:path";
+ import { readBoundedText } from "./site-client.mjs";
++import { deadlineSignal, throwIfAborted } from "./safety.mjs";
+ 
+ export const REGISTRY_URL = "https://models.dev/api.json";
+ const MAX_BYTES = 32 * 1024 * 1024;
+@@ -13,49 +14,67 @@ export function registryCachePaths(env = process.env, home = homedir()) {
+   return [...new Set(roots)].flatMap(root => ["magpie", "opencode"].map(app => join(root, app, "models.json")));
+ }
+ 
+-async function readCache(path) {
++async function readCache(path, signal) {
++  throwIfAborted(signal);
+   const file = await open(path, "r");
+   try {
+     const stat = await file.stat();
++    throwIfAborted(signal);
+     if (!stat.isFile() || stat.size > MAX_BYTES) return undefined;
+     const chunks = [];
+     let size = 0;
+-    for await (const chunk of file.createReadStream({ autoClose: false })) {
++    for await (const chunk of file.createReadStream({ autoClose: false, signal })) {
++      throwIfAborted(signal);
+       size += chunk.byteLength;
+       if (size > MAX_BYTES) return undefined;
+       chunks.push(chunk);
+     }
++    throwIfAborted(signal);
+     const value = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+     if (valid(value)) return value;
+   } finally { await file.close(); }
+ }
+ 
+-// This is capability data, not an account catalog. Read the host's raw cache
+-// (its normalized model objects lose reasoning_options), never rewrite it.
++// Capability data never grants account access. Reads are anonymous and do not
++// modify the host cache. Only signal-free callers share an in-flight refresh;
++// one cancellable caller must not abort another caller's metadata lookup.
+ export function createModelRegistry({ paths = registryCachePaths(), fetchImpl = (...args) => fetch(...args), now = Date.now,
+   ttlMs = 300000, timeoutMs = 5000 } = {}) {
+   let cached = {}, expires = 0, pending;
+-  return async () => {
++  return async ({ signal } = {}) => {
++    throwIfAborted(signal);
+     if (now() < expires) return cached;
+-    if (pending) return pending;
+-    pending = (async () => {
++    if (!signal && pending) return pending;
++    const budget = deadlineSignal(signal, timeoutMs);
++    const task = (async () => {
+       try {
+         for (const path of paths) {
+           try {
+-            const value = await readCache(path);
++            const value = await readCache(path, budget.signal);
+             if (value) { cached = value; return cached; }
+-          } catch {}
++          } catch { throwIfAborted(budget.signal); }
+         }
++        throwIfAborted(budget.signal);
+         const response = await fetchImpl(REGISTRY_URL, {
+-          headers: { accept: "application/json" }, redirect: "error", signal: AbortSignal.timeout(timeoutMs)
++          headers: { accept: "application/json" }, redirect: "error", signal: budget.signal,
+         });
+-        if (!response.ok) { await response.body?.cancel(); return cached; }
+-        const value = JSON.parse(await readBoundedText(response, MAX_BYTES));
++        if (!response.ok) { void response.body?.cancel().catch(() => {}); return cached; }
++        const value = JSON.parse(await readBoundedText(response, MAX_BYTES, { signal: budget.signal, timeoutMs }));
++        throwIfAborted(budget.signal);
+         if (valid(value)) cached = value;
+-      } catch {}
++      } catch {
++        // Caller cancellation propagates; a private metadata timeout is merely
++        // unavailable enrichment and may return the last successful cache.
++        throwIfAborted(signal);
++      }
+       return cached;
+     })();
+-    try { return await pending; }
+-    finally { expires = now() + ttlMs; pending = undefined; }
++    if (!signal) pending = task;
++    try { return await task; }
++    finally {
++      budget.close();
++      if (!signal || !signal.aborted) expires = now() + ttlMs;
++      if (pending === task) pending = undefined;
++    }
+   };
+ }
+diff --git a/.trellis/tasks/11-23-harden-anyrouter/baseline/lib/provider.mjs b/lib/provider.mjs
+index 629e44d..ee5e04e 100644
+--- a/.trellis/tasks/11-23-harden-anyrouter/baseline/lib/provider.mjs
++++ b/lib/provider.mjs
+@@ -1,518 +1,241 @@
+ import { readFileSync } from "node:fs";
+-import {
+-  API_ENDPOINTS,
+-  PLACEHOLDER_KEY,
+-  PROVIDER,
+-  SITES,
+-  accountCapabilities,
+-  apiEndpointChoice,
+-  beijingDay,
+-  protocolBase,
+-  readAccount,
+-  saveAccount
+-} from "./accounts.mjs";
+-import { createSiteClient } from "./site-client.mjs";
++import { randomUUID } from "node:crypto";
++import { PROVIDER, PLACEHOLDER_KEY, SITES, accountCapabilities, readAccount, saveAccount, beijingDay } from "./accounts.mjs";
++import { createAccountOperations } from "./account-operations.mjs";
++import { createSiteClient, parseSessionHandoff } from "./site-client.mjs";
+ import { MODEL_HINT_HEADER, customHeaders, inferenceHeaders } from "./headers.mjs";
+ import { createCatalog, protocolOfURL } from "./catalog.mjs";
+ import { createModelRegistry } from "./model-registry.mjs";
+-import { declaredModels } from "./declared-models.mjs";
+-import { readUsage } from "./usage.mjs";
++import { declaredConfigModels } from "./declared-models.mjs";
++import { readUsage, quotaRate } from "./usage.mjs";
+ import { prepareRequest, prepareAnthropicRequest, prepareCodexRequest } from "./request.mjs";
+ import { loadTextFilter } from "./content-filter.mjs";
+ import { explainResponse } from "./response.mjs";
+ import { SessionRepairError } from "./session-repair.mjs";
++import { positiveId, redactedMessage, throwIfAborted, trustedURL, usableModelKey } from "./safety.mjs";
+ 
++const SITE = SITES.top, MODEL_BASE = `${SITE}/v1`;
+ const required = value => typeof value === "string" && value.trim() ? undefined : "此项必填。";
+-const defaultText = (value) => typeof value === "string" ? value : "";
+-
+-// A new account starts at the public site. Model traffic has exactly one
+-// confirmed base; the second API host in /api/status answers 403 in debt.
+-const SITE = SITES.top;
+-const MODEL_BASE = protocolBase(SITE, "responses");
+-
+ function prompts(mode) {
+   const out = [];
+-  if (mode === "api-key") {
+-    out.push({
+-      type: "text",
+-      key: "email",
+-      message: "账号邮箱（可选，仅作显示名；不是登录凭据）",
+-      validate: value => !value?.trim() || /^[^\s@]+@[^\s@]+$/.test(value.trim()) ? undefined : "请输入邮箱地址，或留空。"
+-    });
+-  }
+-  if (mode === "password") {
+-    out.push(
+-      { type: "text", key: "username", message: "AnyRouter 站点用户名或邮箱", validate: required },
+-      { type: "password", key: "password", message: "AnyRouter 站点密码（不是 GitHub 或 LinuxDO 密码）", validate: required },
+-      {
+-        type: "select",
+-        key: "savePassword",
+-        message: "是否保存站点密码用于每日自动签到？",
+-        options: [
+-          { label: "否 - 只保存这次登录的会话", value: "no" },
+-          { label: "是 - 保存密码用于每日签到", value: "yes" }
+-        ]
+-      }
+-    );
+-  }
+-  if (mode === "access-token") {
+-    out.push(
+-      { type: "password", key: "accessToken", message: "AnyRouter 系统访问令牌（不是模型 API key）", validate: required },
+-      { type: "text", key: "userId", message: "AnyRouter 用户 ID（New-Api-User 的纯数字值）", validate: value => /^[1-9][0-9]*$/.test(String(value ?? "")) ? undefined : "请输入纯数字用户 ID。" }
+-    );
+-  }
+-  if (mode !== "api-key") {
+-    out.push({
+-      type: "password",
+-      key: "modelKey",
+-      message: "已有模型 API key（可选；留空则只启用余额/签到）",
+-      validate: value => !value || !/[\s]/.test(String(value)) ? undefined : "模型 API key 不能包含空白字符。"
+-    });
+-  }
+-  out.push({
+-    type: "text",
+-    key: "headers",
+-    message: "自定义请求头（可选，每行一条 Name: value）",
+-    validate: value => {
+-      try { customHeaders(value); return undefined; } catch (error) { return error.message; }
+-    }
+-  });
++  if (mode === "api-key") out.push({type:"text",key:"email",message:"账号邮箱（可选，仅作显示名）",validate:v=>!v?.trim()||/^[^\s@]+@[^\s@]+$/.test(v.trim())?undefined:"请输入邮箱或留空"});
++  if (mode === "password") out.push(
++    {type:"text",key:"username",message:"AnyRouter 站点用户名或邮箱",validate:required},
++    {type:"password",key:"password",message:"AnyRouter 站点密码（不是 GitHub/LinuxDO 密码）",validate:required},
++    {type:"select",key:"savePassword",message:"是否保存本站密码用于会话失效后的签到登录？",options:[{label:"否 - 只保存会话",value:"no"},{label:"是 - 保存密码",value:"yes"}]} );
++  if (mode === "access-token") out.push(
++    {type:"password",key:"accessToken",message:"系统访问令牌（不是模型 API Key）",validate:required},
++    {type:"text",key:"userId",message:"用户 ID（New-Api-User 正整数）",validate:v=>positiveId(v)?undefined:"请输入纯数字用户 ID。"} );
++  if (mode !== "api-key") out.push(
++    {type:"password",key:"modelKey",message:"已有模型 API Key（可选；留空时尝试只读发现，未发现则仅余额/签到）",validate:v=>!v||usableModelKey(v)?undefined:"模型 Key 无效、被掩码或含空白。"},
++    {type:"text",key:"keyId",message:"已有模型 Key ID（可选；多把 Key 时指定一把，绝不创建/轮换）",validate:v=>!v||positiveId(v)?undefined:"Key ID 必须是正整数。"} );
++  out.push({type:"text",key:"headers",message:"自定义模型请求头（可选，每行 Name: value）",validate:v=>{try{customHeaders(v);return undefined}catch{return "请求头格式无效或包含受管字段"}}});
+   return out;
+ }
+-
+ function accountFromInputs(mode, inputs = {}) {
+-  const endpoint = apiEndpointChoice(inputs.apiEndpoint || "top");
+-  return {
+-    mode,
+-    site: "top",
+-    siteURL: SITE,
+-    apiBase: protocolBase(API_ENDPOINTS[endpoint]),
+-    apiEndpoint: endpoint,
+-    key: "",
+-    keyId: String(inputs.keyId ?? "").trim(),
+-    label: String(inputs.label ?? "").trim(),
+-    email: "",
+-    username: mode === "password" ? String(inputs.username || "").trim() : "",
+-    password: mode === "password" ? String(inputs.password || "") : "",
+-    session: "",
+-    accessToken: mode === "access-token" ? String(inputs.accessToken || "").trim() : "",
+-    userId: mode === "access-token" ? String(inputs.userId || "").trim() : "",
+-    headers: inputs.headers || "",
+-    // Magpie owns the daily schedule. A session or password account is
+-    // eligible; api-key and access-token are not.
+-    checkinEnabled: mode !== "api-key" && mode !== "access-token" &&
+-      (mode !== "password" || inputs.savePassword === "yes")
+-  };
++  if (inputs.apiEndpoint && inputs.apiEndpoint !== "top") throw new Error("模型端点只支持 anyrouter.top");
++  if (inputs.modelKey && !usableModelKey(inputs.modelKey)) throw new Error("请填写完整有效模型 API Key 或留空");
++  if (inputs.keyId && !positiveId(inputs.keyId)) throw new Error("模型 Key ID 必须是正整数");
++  customHeaders(inputs.headers ?? "");
++  return {mode,site:"top",siteURL:SITE,apiBase:MODEL_BASE,key:"",keyId:String(inputs.keyId??"").trim(),email:"",label:"",
++    username:mode==="password"?String(inputs.username??"").trim():"",
++    password:mode==="password"?String(inputs.password??""):"",
++    accessToken:mode==="access-token"?String(inputs.accessToken??"").trim():"",
++    userId:mode==="access-token"?positiveId(inputs.userId):"",session:"",headers:inputs.headers??"",
++    checkinEnabled:mode!=="api-key"&&mode!=="access-token"&&(mode!=="password"||inputs.savePassword==="yes"),loginGeneration:randomUUID()};
+ }
+-
+-const failed = error => ({ type: "failed", error: error?.message || "站点未能完成登录。" });
+-
+-async function finishLogin(result, inputs = {}) {
+-  // A password login only returns a clean user object; read the profile again
+-  // to verify the UID and capture email/username. Session imports already
+-  // verified it in site.importSession().
+-  const verified = result.profileVerified
+-    ? result.account
+-    : (await result.siteClient.profile(result.account)).account;
+-  if (!verified?.userId) throw new Error("站点没有返回有效的用户 ID。");
+-  let key = String(inputs.modelKey || "").trim();
+-  let keyId = String(inputs.keyId || "").trim();
++const failed = (error, account = {}) => ({type:"failed",error:redactedMessage(error?.name==="AbortError"||error?.name==="TimeoutError"?"登录已取消或超时":error?.message||"站点未能完成登录",account)});
++async function finishLogin(op, inputs = {}, now = Date.now()) {
++  const profile = await op.profile();
++  let key = String(inputs.modelKey??"").trim(), keyId = String(inputs.keyId??"").trim();
+   if (!key) {
+-    try {
+-      const found = await result.siteClient.selectKey(verified, keyId);
+-      key = found.key;
+-      keyId = found.keyId;
+-    } catch (error) {
+-      // A site account with no model key is still useful for balance and
+-      // check-in. Do not fail the whole login for a missing key or a WAF on
+-      // the optional key-list endpoint.
+-      if (error?.kind === "credentials" || error?.kind === "forbidden") throw error;
+-    }
++    try {const found = await op.selectKey(keyId);key=found.key;keyId=found.keyId;}
++    catch(error){throwIfAborted(op.signal);if(keyId || ["credentials","identity","forbidden"].includes(error?.kind))throw error;}
+   }
+-  const state = { ...verified, key, keyId, hasModelKey: Boolean(key) };
+-  const { type, ...record } = saveAccount(state);
+-  return { type: "success", ...record };
++  const state={...profile.account,...op.account(),key,keyId,hasModelKey:usableModelKey(key)};
++  const {type,...record}=saveAccount(state, {}, now);
++  return {type:"success",...record};
+ }
+-
+ function requestURL(request, init, headers, account, provider, explicit) {
+-  const original = new URL(request instanceof Request ? request.url : String(request));
++  const original = trustedURL(request, { model:true });
+   const protocol = protocolOfURL(original.href);
+   if (!protocol) return original.href;
+   let id = headers.get(MODEL_HINT_HEADER);
+-  if (!id && init.body) {
+-    try {
+-      const body = typeof init.body === "string" ? init.body : "";
+-      const model = JSON.parse(body).model;
+-      if (typeof model === "string") id = model;
+-    } catch {}
+-  }
+-  const [name, model] = Object.entries(provider.models ?? {})
+-    .find(([name, model]) => name === id || model.api?.id === id) ?? [id, null];
+-  const user = explicit.models?.[name] ||
+-    Object.entries(explicit.models ?? {}).find(([name, model]) => (model.id || name) === id)?.[1];
+-  const isOfficialBase = value => {
+-    try {
+-      const parsed = new URL(value);
+-      return parsed.origin === "https://anyrouter.top" &&
+-        ["", "/", "/v1", "/v1beta"].includes(parsed.pathname.replace(/\/+$/, ""));
+-    } catch { return false; }
+-  };
+-  const userModelBase = user?.provider?.api || "";
+-  const catalogModelBase = model?.api?.url || "";
+-  const modelBase = userModelBase || (catalogModelBase && !isOfficialBase(catalogModelBase) ? catalogModelBase : "");
+-  const base = (modelBase || account.apiBase || protocolBase(account.siteURL, protocol)).replace(/\/+$/, "");
+-  if (original.href.startsWith(base + "/")) {
+-    if (protocol === "anthropic" && !original.searchParams.has("beta")) original.searchParams.set("beta", "true");
+-    return original.href;
+-  }
++  if (!id && typeof init.body === "string" && init.body.length <= 4*1024*1024) {try{id=JSON.parse(init.body).model;}catch{}}
++  const entry = Object.entries(explicit.models??{}).find(([name,m])=>name===id||(m.id||name)===id)?.[1];
++  const base = entry?.provider?.api || account.apiBase || explicit.api || MODEL_BASE;
++  const validBase = trustedURL(base, {base:true});
++  const normalized = validBase.href.replace(/\/+$/, "").replace(/\/(?:v1beta)$/, "/v1");
++  const root = /\/v1$/.test(normalized)?normalized:`${normalized}/v1`;
+   const suffix = original.pathname.match(/\/(?:responses|chat\/completions|messages)\/?$/)?.[0];
+-  if (protocol === "anthropic" && !original.searchParams.has("beta")) original.searchParams.set("beta", "true");
+-  return base + suffix + original.search;
++  return suffix ? trustedURL(root + suffix + original.search,{model:true}).href : original.href;
+ }
+-
+-function checkinFailure(error) {
+-  const kind = error?.kind;
+-  const outcome = kind === "captcha" || kind === "waf" ? "captcha"
+-    : kind === "credentials" || kind === "forbidden" ? "ineligible"
+-      : kind === "inactive" ? "inactive"
+-        : kind === "already" ? "done"
+-          : "failed";
+-  return { outcome, message: error?.message || "AnyRouter 签到失败。" };
++function checkinFailure(error, account = {}) {
++  const kind=error?.kind;
++  return {outcome:kind==="captcha"||kind==="waf"?"captcha":["credentials","forbidden","identity"].includes(kind)?"ineligible":kind==="inactive"?"inactive":kind==="already"?"done":"failed",
++    message:redactedMessage(error?.message||"AnyRouter 签到未确认成功",account)};
+ }
++const authOptions = [
++  {key:"send-codex-headers",label:"发送 Codex 客户端请求头",description:"仅控制 Responses 的客户端请求头和兼容字段；不影响 Claude。",default:true},
++  {key:"claude-code-compat",label:"Claude Code 请求兼容",description:"仅控制 Messages 的请求头、beta 参数和 system/metadata；关闭后不注入。",default:true},
++  {key:"portable-responses",label:"内联发送完整的 Responses 历史",description:"只内联已知且完整的消息和工具，不处理不透明历史。",default:true},
++  {key:"text-filter",label:"发送前替换本地词表中的文字",description:"仅处理 Responses 可见正文；无词表不替换。",default:true},
++  {key:"codex-session-repair",label:"清理 Codex 会话的旧资源绑定（有损）",description:"默认关闭，清理后的工具关联必须完整；可能丢失历史上下文。",confirm:"会丢弃发送副本中的加密、压缩或仅引用历史，可能丢失上下文。确认开启？",default:false},
++  {key:"request-diagnostics",label:"响应错误诊断",description:"只改写尚未产生内容的明确错误；保留部分输出，绝不重试。",default:true},
++];
+ 
+ export async function createProvider(input = {}, options = {}, dependencies = {}) {
+-  const fetchImpl = dependencies.fetchImpl || ((...args) => fetch(...args));
+-  const now = dependencies.now || Date.now;
+-  const site = createSiteClient({ fetchImpl, now, timeoutMs: options.siteTimeoutMs ?? 30_000 });
+-  let explicit = {};
+-  const compatibility = () => input.magpie?.option?.(PROVIDER, "send-codex-headers") !== false;
+-  const claudeCompat = () => input.magpie?.option?.(PROVIDER, "claude-code-compat") !== false;
+-  const loadRegistry = dependencies.loadRegistry || createModelRegistry({ fetchImpl });
+-  const catalog = createCatalog({ site, explicit: () => explicit, compatibility, fetchImpl, loadRegistry });
+-  const pending = new Map();
++  const fetchImpl=dependencies.fetchImpl||((...args)=>fetch(...args)), now=dependencies.now||Date.now;
++  const timeoutMs=options.siteTimeoutMs??30000, rate=quotaRate(options.quotaPerUnit??500000);
++  const site=createSiteClient({fetchImpl,now,timeoutMs});
++  const operations=createAccountOperations({site,client:input.client,timeoutMs,now});
+   const completed = new Map();
+-  const quotaPerUnit = Number(options.quotaPerUnit ?? 500000);
+-  if (!Number.isFinite(quotaPerUnit) || quotaPerUnit <= 0) throw new Error("quotaPerUnit must be a positive number.");
++  let explicit={}, lastConfig;
++  const enabled = key => input.magpie?.option?.(PROVIDER,key) !== false;
++  const loadRegistry=dependencies.loadRegistry||createModelRegistry({fetchImpl,...(options.modelsRegistryPath?{paths:[options.modelsRegistryPath]}:{})});
++  const catalog=createCatalog({site,explicit:()=>explicit,compatibility:()=>enabled("send-codex-headers"),fetchImpl,loadRegistry});
+ 
+-  const methods = [
+-    {
+-      // magpie finishes an oauth sign-in only through its callback(), so the
+-      // work happens there. "auto" means no code for the user to paste: the
+-      // host calls the callback on its own.
+-      type: "oauth",
+-      label: "AnyRouter 账号密码（可选每日签到）",
+-      prompts: prompts("password"),
+-      async authorize(inputs) {
+-        const account = accountFromInputs("password", inputs);
+-        let used = false;
+-        return {
+-          // No URL: nothing for the user to open, the callback does the work.
+-          url: "",
+-          method: "auto",
+-          instructions: "正在使用账号密码登录 AnyRouter 并校验账号；如果站点开启 Turnstile，请改用浏览器会话入口。",
+-          async callback() {
+-            if (used) return failed(new Error("这次登录已经完成，请重新发起。"));
+-            used = true;
+-            try {
+-              const login = await site.login(account);
+-              return await finishLogin({ ...login, siteClient: site }, inputs);
+-            } catch (error) { return failed(error); }
+-          }
+-        };
+-      }
+-    },
+-    ...["github", "linuxdo"].map(provider => ({
+-      type: "oauth",
+-      label: provider === "github" ? "使用 GitHub 登录 AnyRouter（浏览器交接）" : "使用 LinuxDO 登录 AnyRouter（浏览器交接）",
+-      prompts: prompts(provider),
+-      async authorize(inputs) {
+-        const account = accountFromInputs(provider, inputs);
+-        let used = false;
+-        return {
+-          url: SITE + "/login",
+-          method: "code",
+-          instructions: `在 AnyRouter 登录页选择 ${provider === "github" ? "GitHub" : "LinuxDO"} 并完成登录。登录后打开浏览器 DevTools → Network，刷新账号页，把 /api/user/self 请求复制为 cURL 粘贴回这里；也接受 {"cookie":"...","userId":"..."} JSON。只导入 AnyRouter 会话和用户 ID，不会执行命令。`,
+-          async callback(value) {
+-            if (used) return failed(new Error("这份回传已被使用，请重新发起登录。"));
+-            used = true;
+-            try {
+-              const imported = await site.importSession(account, value);
+-              return await finishLogin({ ...imported, siteClient: site }, inputs);
+-            } catch (error) { return failed(error); }
+-          }
+-        };
+-      }
+-    })),
+-    {
+-      type: "oauth",
+-      label: "AnyRouter 浏览器会话（WAF/JS 盾请用此入口；可签到）",
+-      prompts: prompts("session"),
+-      async authorize(inputs) {
+-        const account = accountFromInputs("session", inputs);
+-        let used = false;
+-        return {
+-          url: SITE + "/login",
+-          method: "code",
+-          instructions: "在浏览器完成 AnyRouter 登录和 WAF/JS 盾验证，然后从 DevTools → Network 复制 /api/user/self 的 cURL 粘贴回来，或粘贴 {\"cookie\":\"...\",\"userId\":\"...\"} JSON。插件只解析文本，不执行命令。",
+-          async callback(value) {
+-            if (used) return failed(new Error("这份回传已被使用，请重新发起登录。"));
+-            used = true;
+-            try {
+-              const imported = await site.importSession(account, value);
+-              return await finishLogin({ ...imported, siteClient: site }, inputs);
+-            } catch (error) { return failed(error); }
+-          }
+-        };
+-      }
+-    },
+-    {
+-      type: "oauth",
+-      label: "AnyRouter 系统访问令牌（余额，不签到）",
+-      prompts: prompts("access-token"),
+-      async authorize(inputs) {
+-        const account = accountFromInputs("access-token", inputs);
+-        let used = false;
+-        return {
+-          url: "",
+-          method: "auto",
+-          instructions: "正在用系统访问令牌只读校验账号；插件不会调用 /api/user/token，也不会创建或轮换任何 Key。",
+-          async callback() {
+-            if (used) return failed(new Error("这次登录已经完成，请重新发起。"));
+-            used = true;
+-            try {
+-              const profile = await site.profile(account);
+-              return await finishLogin({ ...profile, siteClient: site }, inputs);
+-            } catch (error) { return failed(error); }
+-          }
+-        };
+-      }
+-    },
+-    {
+-      type: "api",
+-      label: "AnyRouter 模型 API Key（仅推理）",
+-      placeholder: "模型 API key（sk-…）",
+-      prompts: prompts("api-key")
+-    }
++  function siteMethod(mode, label) {
++    const automatic=mode==="password"||mode==="access-token";
++    return {type:"oauth",label,prompts:prompts(mode),async authorize(inputs={}, {signal}={}) {
++      throwIfAborted(signal);
++      let account;
++      try {account=accountFromInputs(mode,inputs);}catch(error){return failed(error);}
++      let used=false;
++      return {url:automatic?"":`${SITE}/login`,method:automatic?"auto":"code",
++        instructions:automatic?(mode==="password"?"正在登录并校验本站账号和已有 Key；包含一次认证 POST，不会额外签到或创建/轮换令牌。":"正在只读校验本站账号和已有 Key；不会签到或创建/轮换令牌。"):"请在浏览器完成本站登录及验证，粘贴 /api/user/self 的 cURL 或 {cookie,userId} JSON（不执行命令）。不要把凭据发送到聊天或日志。",
++        async callback(value,{signal:callbackSignal}={}) {
++          if(used)return failed(new Error("这次登录已经完成，请重新发起。"));used=true;
++          let op;
++          try {
++            throwIfAborted(signal);throwIfAborted(callbackSignal);
++            const combined=signal&&callbackSignal?AbortSignal.any([signal,callbackSignal]):callbackSignal||signal;
++            if(!automatic) {const handoff=parseSessionHandoff(value);account={...account,...handoff,accessToken:"",password:""};}
++            op=site.openSession(account,{signal:combined});
++            if(mode==="password")await op.login();
++            return await finishLogin(op,inputs,now());
++          }catch(error){return failed(error,account);}finally{op?.close();}
++        }};
++    }};
++  }
++  const methods=[
++    siteMethod("password","AnyRouter 账号密码（可选保存密码）"),
++    siteMethod("github","GitHub 登录 AnyRouter（浏览器会话交接）"),
++    siteMethod("linuxdo","LinuxDO 登录 AnyRouter（浏览器会话交接）"),
++    siteMethod("session","浏览器会话（余额与每日签到）"),
++    siteMethod("access-token","系统访问令牌（读取已有 Key，不签到）"),
++    {type:"api",label:"AnyRouter 模型 API Key（仅推理）",placeholder:"sk-…",prompts:prompts("api-key")}
+   ];
+-
+   return {
+     async config(cfg) {
+-      cfg.provider ??= {};
+-      explicit = structuredClone(cfg.provider[PROVIDER] ?? {});
+-      cfg.provider[PROVIDER] ??= {
+-        name: "AnyRouter",
+-        npm: "@ai-sdk/anthropic",
+-        api: MODEL_BASE,
+-        models: declaredModels()
+-      };
+-      cfg.provider[PROVIDER].api ??= MODEL_BASE;
+-      cfg.provider[PROVIDER].npm ??= "@ai-sdk/anthropic";
+-      cfg.provider[PROVIDER].models ??= declaredModels();
++      cfg.provider??={};
++      // A host may call config twice on the object already modified by us. Do
++      // not reinterpret plugin defaults as fresh user override declarations.
++      if(cfg.provider[PROVIDER]!==lastConfig)explicit=structuredClone(cfg.provider[PROVIDER]??{});
++      const p=cfg.provider[PROVIDER]??={name:"AnyRouter",npm:"@ai-sdk/anthropic",api:MODEL_BASE,models:declaredConfigModels()};
++      p.api??=MODEL_BASE;p.npm??="@ai-sdk/anthropic";p.models??=declaredConfigModels();lastConfig=p;
+     },
+-    auth: {
+-      provider: PROVIDER,
+-      methods,
+-      icon: `data:image/png;base64,${readFileSync(new URL("../icon.png", import.meta.url)).toString("base64")}`,
+-      options: [
+-        {
+-          key: "send-codex-headers",
+-          label: "发送 Codex 客户端请求头",
+-          description: "Responses 模型请求附带 AnyRouter 认可的 Codex 客户端标识；关闭后仍发送账号自定义头。",
+-          default: true
+-        },
+-        {
+-          key: "claude-code-compat",
+-          label: "Claude Code 请求兼容",
+-          description: "Anthropic Messages 请求补充 Claude Code 的 system 块、metadata 与 beta 参数；关闭后原样透传。",
+-          default: true
+-        },
+-        {
+-          key: "portable-responses",
+-          label: "内联发送完整的 Responses 历史",
+-          description: "仅在内容完整可内联时移除资源绑定的条目 ID，保留 call_id 和加密内容。",
+-          default: true
+-        },
+-        {
+-          key: "text-filter",
+-          label: "发送前替换本地词表中的文字",
+-          description: "使用 content-filter.local.json 中自行配置的词表；无词表时不替换。",
+-          default: true
+-        },
+-        {
+-          key: "codex-session-repair",
+-          label: "清理 Codex 会话的旧资源绑定（有损）",
+-          description: "默认关闭。发送前清理旧资源 ID、加密/压缩历史及仅引用条目；可能丢失上下文。",
+-          confirm: "开启后会丢弃发送副本中的加密、压缩及仅引用历史，可能丢失上下文。确认开启？",
+-          default: false
+-        },
+-        {
+-          key: "request-diagnostics",
+-          label: "响应错误诊断",
+-          description: "识别 JSON/SSE 早期错误并保留上游状态、错误码与等待提示；不自动重试。",
+-          default: true
+-        }
+-      ],
+-      async loader(getAuth, provider) {
+-        const initial = readAccount(await getAuth(), provider);
+-        if (!initial) return {};
+-        return {
+-          apiKey: initial.hasModelKey ? initial.key : PLACEHOLDER_KEY,
+-          async fetch(request, init = {}) {
+-            const account = readAccount(await getAuth(), provider);
+-            if (!account) {
+-              return Response.json({ error: { type: "invalid_request_error", code: "anyrouter_missing_account", message: "AnyRouter 账号已移除或无法读取。" } }, { status: 401 });
+-            }
+-            if (!account.hasModelKey || !account.key) {
+-              return Response.json({ error: {
+-                type: "invalid_request_error", code: "anyrouter_missing_api_key",
+-                message: "该账号没有模型 API Key。请重新登录并填写模型 Key，或改用「AnyRouter 模型 API Key」入口。"
+-              } }, { status: 400 });
++    auth:{provider:PROVIDER,methods,icon:`data:image/png;base64,${readFileSync(new URL("../icon.png",import.meta.url)).toString("base64")}`,options:authOptions.map(o=>({...o})),
++      async loader(getAuth,provider={}) {
++        const initial=readAccount(await getAuth(),provider,now());if(!initial)return{};
++        const sameInference = a => a && a.key===initial.key && a.userId===initial.userId && a.apiBase===initial.apiBase && a.loginGeneration===initial.loginGeneration;
++        let filterPromise;
++        return {apiKey:initial.hasModelKey?initial.key:PLACEHOLDER_KEY,async fetch(request,init={}) {
++          const signal=init.signal??(request instanceof Request?request.signal:undefined);
++          throwIfAborted(signal);
++          let account;try{account=readAccount(await getAuth(),provider,now());}catch{return localError("anyrouter_invalid_account","账号记录无效，请重新登录",400);}
++          if(!account)return localError("anyrouter_missing_account","AnyRouter 账号已移除",401);
++          if(!accountCapabilities(account,now()).inference)return localError("anyrouter_missing_api_key","该账号仅余额/签到，没有有效模型 API Key。请重新登录并填写 Key 或目标 Key ID。",400);
++          if(!sameInference(account))return localError("anyrouter_account_changed","请求期间账号或模型 Key 已变化，请重新发起",409);
++          const incoming=new Headers(request instanceof Request?request.headers:undefined);new Headers(init.headers).forEach((v,k)=>incoming.set(k,v));
++          let url;try{url=requestURL(request,init,incoming,account,provider,explicit);}catch{return localError("anyrouter_untrusted_destination","已阻止向非受信任地址或未知接口发送模型 Key",400);}
++          const protocol=protocolOfURL(url), compat=protocol==="anthropic"?enabled("claude-code-compat"):enabled("send-codex-headers");
++          const headers=inferenceHeaders(account,incoming,protocol,compat);
++          let target=request instanceof Request?new Request(url,request):url;
++          let prepared={...init,headers,redirect:"manual",signal};
++          try {
++            if(protocol==="responses") {
++              if(compat)prepared=await prepareCodexRequest(target,prepared);
++              const filter=enabled("text-filter")?await (filterPromise??=loadTextFilter()):null;
++              prepared=await prepareRequest(target,prepared,{portableResponses:enabled("portable-responses"),textFilter:filter,sessionRepair:input.magpie?.option?.(PROVIDER,"codex-session-repair")===true});
++            } else if(protocol==="anthropic"&&compat)prepared=await prepareAnthropicRequest(target,prepared);
++          }catch(error){throwIfAborted(signal);if(error instanceof SessionRepairError)return localError(error.code,error.message,400);return localError("anyrouter_request_config","请求兼容或本地词表配置无效，未发送请求",400);}
++          if(prepared.url){url=prepared.url;target=target instanceof Request?new Request(url,target):url;prepared={...prepared};delete prepared.url;}
++          try{trustedURL(url,{model:true});}catch{return localError("anyrouter_untrusted_destination","已阻止非受信任的请求目标",400);}
++          throwIfAborted(signal);if(!sameInference(readAccount(await getAuth(),provider,now())))return localError("anyrouter_account_changed","准备期间账号已变化，未发送",409);
++          const response=await fetchImpl(target,{...prepared,redirect:"manual"});
++          if(response.status>=300&&response.status<400){void response.body?.cancel().catch(()=>{});return localError("anyrouter_upstream_redirect","模型接口返回重定向，已阻止转发凭据",502);}
++          return enabled("request-diagnostics")?explainResponse(response,{retryAfterSeconds:account.retryAfterSeconds??explicit.retryAfterSeconds??options.retryAfterSeconds,signal,account}):response;
++        }};
++      },
++      async usage(getAuth,provider={}, {signal}={}) {
++        try {
++          const account=readAccount(await getAuth(),provider,now());if(!account)return{error:"未连接 AnyRouter 账号",windows:[],signIn:"kept"};
++          if(account.mode==="api-key")return await readUsage(site,account,{quotaPerUnit:rate,now,fetchImpl,signal});
++          return await operations.run("usage",getAuth,provider,signal,async({account,op,persist,check,signal})=>{
++            const result=await readUsage(op,account,{quotaPerUnit:rate,now,fetchImpl,signal});await check();
++            try{if(!await persist())return{...result,error:"读取完成，但账号凭据存储不可用或登录已变化，请重新检查",signIn:"kept"};}catch{return{...result,error:"读取完成，但 Cookie 状态保存失败",signIn:"kept"};}
++            return result;
++          });
++        }catch(error){throwIfAborted(signal);return{error:redactedMessage(error?.message||"读取账号失败"),windows:[],signIn:"kept"};}
++      },
++      async checkin(getAuth, provider = {}, { signal } = {}) {
++        try {
++          return await operations.run("checkin", getAuth, provider, signal, async ({ account, op, persist, check, signal }) => {
++            if (!accountCapabilities(account, now()).checkin) {
++              return { outcome: "ineligible", message: "每日签到需要本站有效会话或已保存本站密码" };
+             }
+-            if ((initial.userId && account.userId && initial.userId !== account.userId) ||
+-                initial.apiBase !== account.apiBase ||
+-                ((!initial.userId || !account.userId) && initial.key !== account.key)) {
+-              return Response.json({ error: {
+-                type: "invalid_request_error", code: "anyrouter_account_changed",
+-                message: "请求期间所选账号已变化，已阻止发送。请重新发起请求。"
+-              } }, { status: 409 });
++            let day = beijingDay(now());
++            const key = `${account.siteURL}:${account.userId}:${account.loginGeneration}`;
++            for (const [k, v] of completed) if (v.day !== day) completed.delete(k);
++            if (account.lastCheckinDay === day && ["claimed", "done"].includes(account.lastCheckin?.outcome) || completed.get(key)?.day === day) {
++              return { outcome: "done", message: "该账号今天的签到已确认完成" };
+             }
+-            const incoming = new Headers(request instanceof Request ? request.headers : undefined);
+-            new Headers(init.headers).forEach((value, name) => incoming.set(name, value));
+-            const url = requestURL(request, init, incoming, account, provider, explicit);
+-            const protocol = protocolOfURL(originalURL(request, url));
+-            const headers = inferenceHeaders(account, incoming, protocol, compatibility());
+-            let target = request instanceof Request ? new Request(url, request) : url;
+-            const requestInit = { ...init, headers };
+-            let prepared = requestInit;
++            let result;
+             try {
+-              if (protocol === "responses") {
+-                prepared = compatibility() ? await prepareCodexRequest(target, requestInit) : requestInit;
+-                const textFilter = input.magpie?.option?.(PROVIDER, "text-filter") !== false ? await loadTextFilter() : null;
+-                prepared = await prepareRequest(target, prepared, {
+-                  portableResponses: input.magpie?.option?.(PROVIDER, "portable-responses") !== false,
+-                  textFilter,
+-                  sessionRepair: input.magpie?.option?.(PROVIDER, "codex-session-repair") === true,
+-                });
+-              } else if (protocol === "anthropic" && claudeCompat()) {
+-                prepared = await prepareAnthropicRequest(target, requestInit, { compatibility: true });
++              // Network/WAF failures are not permission to log in again. Use
++              // a saved password only after a refused or expired site session.
++              try { await op.self(); }
++              catch (error) {
++                throwIfAborted(signal);
++                if (error.kind !== "credentials" || !account.password) throw error;
++                await op.login(); await op.self();
+               }
++              await check();
++              const confirmed = site.checkinResult(await op.signIn());
++              result = confirmed.lastCheckin;
++              // Preflight or queue waits may cross Beijing midnight. Record the
++              // confirmation day rather than the day captured before the GET.
++              day = confirmed.lastCheckinDay;
+             } catch (error) {
+-              if (!(error instanceof SessionRepairError)) throw error;
+-              return Response.json({ error: { type: "invalid_request_error", code: error.code, message: error.message } }, { status: 400 });
+-            }
+-            if (prepared?.url) {
+-              target = new Request(prepared.url, target);
+-              prepared = { ...prepared };
+-              delete prepared.url;
+-            }
+-            const response = await fetchImpl(target, prepared);
+-            return input.magpie?.option?.(PROVIDER, "request-diagnostics") === false
+-              ? response
+-              : explainResponse(response, {
+-                retryAfterSeconds: explicit.retryAfterSeconds ?? options.retryAfterSeconds,
+-                provider: "anyrouter"
+-              });
+-          }
+-        };
+-      },
+-      async usage(getAuth, provider) {
+-        const account = readAccount(await getAuth(), provider);
+-        if (!account) return { error: "未连接 AnyRouter 账号。", windows: [], signIn: "kept" };
+-        return readUsage(site, account, { quotaPerUnit, now, fetchImpl });
+-      },
+-      async checkin(getAuth, provider) {
+-        const auth = await getAuth();
+-        const account = readAccount(auth, provider);
+-        if (!accountCapabilities(account).checkin) {
+-          return { outcome: "ineligible", message: "每日签到需要 AnyRouter 站点会话或账号密码。" };
+-        }
+-        const day = beijingDay(now());
+-        for (const [key, value] of completed) if (value.day !== day) completed.delete(key);
+-        const key = `${account.siteURL}:${account.userId}`;
+-        if (account.lastCheckinDay === day || completed.get(key)?.day === day) {
+-          return { outcome: "done", message: "该账号今日签到已完成。" };
+-        }
+-        if (pending.has(key)) {
+-          const result = await pending.get(key);
+-          return result.outcome === "claimed" ? { outcome: "done", message: "并发的每日签到已完成。" } : result;
+-        }
+-
+-        const operation = (async () => {
+-          let siteAccount = account;
+-          let session = account.session;
+-          try {
+-            if (account.mode === "password" && account.password) {
+-              const login = await site.login(account);
+-              siteAccount = login.account;
+-              session = login.account.session;
+-            }
+-            // Read-only warmup proves the UID and obtains a fresh WAF cookie
+-            // before the single mutating POST.
+-            await site.self(siteAccount);
+-            const signIn = await site.signIn(siteAccount);
+-            session = signIn.cookies || session;
+-            const daily = site.checkinResult(signIn);
+-            if (daily.lastCheckin.outcome === "failed") return daily.lastCheckin;
+-            completed.set(key, { day: daily.lastCheckinDay });
+-            const latestAuth = await getAuth();
+-            const latest = readAccount(latestAuth, provider);
+-            if (!latest || latest.userId !== account.userId || latest.siteURL !== account.siteURL) {
+-              return { ...daily.lastCheckin, message: "签到已完成，但所选账号已变更，未覆盖其凭据。" };
++              throwIfAborted(signal);
++              result = checkinFailure(error, account);
+             }
++            const success = ["claimed", "done"].includes(result.outcome);
++            if (success) completed.set(key, { day });
+             try {
+-              await input.client?.auth?.set?.({
+-                path: { id: PROVIDER },
+-                body: saveAccount({ ...latest, session, lastCheckinDay: daily.lastCheckinDay, lastCheckin: daily.lastCheckin }, latestAuth)
+-              });
+-            } catch {
+-              return { ...daily.lastCheckin, message: "签到已完成，但刷新后的站点会话未能保存。" };
+-            }
+-            return daily.lastCheckin;
+-          } catch (error) {
+-            session = error?.cookies || session;
+-            const result = checkinFailure(error);
+-            if (result.outcome !== "failed") {
+-              completed.set(key, { day });
+-              try {
+-                const latestAuth = await getAuth();
+-                const latest = readAccount(latestAuth, provider);
+-                if (latest?.userId === account.userId && latest.siteURL === account.siteURL) {
+-                  await input.client?.auth?.set?.({
+-                    path: { id: PROVIDER },
+-                    body: saveAccount({ ...latest, session, lastCheckinDay: day, lastCheckin: result }, latestAuth)
+-                  });
+-                }
+-              } catch {}
+-            }
++              const patch = success ? { lastCheckinDay: day, lastCheckin: result } : {};
++              if (!await persist(patch)) {
++                return { ...result, message: `${result.message}；登录已变化或本地存储不可用，旧 Cookie 未保存` };
++              }
++            } catch { return { ...result, message: `${result.message}；本地 Cookie 保存失败` }; }
+             return result;
+-          }
+-        })();
+-        pending.set(key, operation);
+-        try { return await operation; } finally { pending.delete(key); }
+-      }
+-    },
+-    provider: {
+-      id: PROVIDER,
+-      models: (provider, { auth } = {}) => catalog(provider, readAccount(auth, provider))
+-    },
+-    "chat.headers": async (context, output) => {
+-      if (context.model?.providerID !== PROVIDER && context.provider?.info?.id !== PROVIDER) return;
+-      const supplied = new Headers(context.model?.headers);
+-      const modelId = context.model?.id || context.model?.api?.id;
+-      if (modelId) output.headers[MODEL_HINT_HEADER] = modelId;
+-      if (context.sessionID && !supplied.has("x-session-id") && !output.headers["x-session-id"]) {
+-        output.headers["x-session-id"] = context.sessionID;
+-        if (context.model?.api?.npm === "@ai-sdk/anthropic") {
+-          output.headers["x-claude-code-session-id"] = context.sessionID;
++          });
++        } catch (error) {
++          throwIfAborted(signal);
++          return checkinFailure(error);
+         }
+       }
++    },
++    provider:{id:PROVIDER,models:(provider,{auth,signal}={})=>catalog(provider,readAccount(auth,provider,now()),{signal})},
++    "chat.headers":async(context,output)=>{
++      if(context.model?.providerID!==PROVIDER&&context.provider?.info?.id!==PROVIDER)return;
++      output.headers??={};const h=new Headers(output.headers), supplied=new Headers(context.model?.headers);
++      const modelId=context.model?.id||context.model?.api?.id;if(modelId)output.headers[MODEL_HINT_HEADER]=modelId;
++      if(context.sessionID&&!supplied.has("x-session-id")&&!h.has("x-session-id"))output.headers["x-session-id"]=context.sessionID;
++      if(context.sessionID&&context.model?.api?.npm==="@ai-sdk/anthropic"&&!supplied.has("x-claude-code-session-id")&&!h.has("x-claude-code-session-id"))output.headers["x-claude-code-session-id"]=context.sessionID;
+     }
+   };
+ }
+-
+-function originalURL(request, fallback) {
+-  try { return request instanceof Request ? request.url : String(request); }
+-  catch { return fallback; }
+-}
+-
+-export const _internal = { prompts, accountFromInputs, finishLogin, requestURL, checkinFailure };
++function localError(code,message,status){return Response.json({error:{type:"invalid_request_error",code,message}},{status,headers:{"x-magpie-sign-in":"kept"}});}
++export const _internal={prompts,accountFromInputs,finishLogin,requestURL,checkinFailure};
+diff --git a/.trellis/tasks/11-23-harden-anyrouter/baseline/lib/request.mjs b/lib/request.mjs
+index fcc1967..75008d0 100644
+--- a/.trellis/tasks/11-23-harden-anyrouter/baseline/lib/request.mjs
++++ b/lib/request.mjs
+@@ -1,4 +1,5 @@
+ import { randomUUID } from "node:crypto";
++import { isRecord, throwIfAborted } from "./safety.mjs";
+ import { redactResponsesBody } from "./content-filter.mjs";
+ import { readCloneText } from "./body-inspection.mjs";
+ import { repairSessionResources } from "./session-repair.mjs";
+@@ -7,7 +8,15 @@ import { repairSessionResources } from "./session-repair.mjs";
+ // retrieve them by an old item ID. Never remove call_id or opaque contents.
+ function isInlinePart(part) {
+   if (!part || typeof part !== "object") return false;
+-  if (["input_text", "input_image", "input_file", "input_audio"].includes(part.type)) return true;
++  if (part.type === "input_text") return typeof part.text === "string" &&
++    Object.keys(part).every(key => ["type", "text"].includes(key));
++  if (part.type === "input_image") return typeof part.image_url === "string" && part.image_url.length > 0 &&
++    Object.keys(part).every(key => ["type", "image_url", "detail"].includes(key)) &&
++    (part.detail === undefined || ["auto", "low", "high", "original"].includes(part.detail));
++  if (part.type === "input_file") return typeof part.file_data === "string" && part.file_data.length > 0 &&
++    Object.keys(part).every(key => ["type", "file_data", "filename"].includes(key));
++  // File IDs, unknown/signed fragments and audio resource objects are not
++  // proven complete portable history. Their containing message stays intact.
+   if (part.type !== "output_text" || typeof part.text !== "string") return false;
+   // The gateway also emits logprobs: [] on ordinary completed text. Empty
+   // probability metadata adds no content; populated or unknown data stays intact.
+@@ -26,10 +35,12 @@ function hasInlineContent(item) {
+         (typeof item.content === "string" && item.content.length > 0 ||
+           Array.isArray(item.content) && item.content.length > 0 && item.content.every(isInlinePart));
+     case "function_call":
+-      return typeof item.call_id === "string" && item.call_id.length > 0 &&
++      return Object.keys(item).every(key => ["type", "id", "call_id", "name", "arguments", "status", "namespace"].includes(key)) &&
++        typeof item.call_id === "string" && item.call_id.length > 0 &&
+         typeof item.name === "string" && item.name.length > 0 && typeof item.arguments === "string";
+     case "function_call_output":
+-      return typeof item.call_id === "string" && item.call_id.length > 0 &&
++      return Object.keys(item).every(key => ["type", "id", "call_id", "output", "status"].includes(key)) &&
++        typeof item.call_id === "string" && item.call_id.length > 0 &&
+         (typeof item.output === "string" || Array.isArray(item.output));
+     // Reasoning IDs are required by the published input schema; encrypted
+     // state has no cross-resource portability guarantee. Preserve it intact.
+@@ -42,114 +53,96 @@ function hasInlineContent(item) {
+ 
+ const MAX_BODY = 4 * 1024 * 1024;
+ const CLAUDE_DEVICE_ID = randomUUID();
++const CODEX_INSTALLATION_ID = randomUUID();
+ const CLAUDE_SYSTEM_INTRO = "You are Claude Code, Anthropic's official CLI for Claude.";
+ const CLAUDE_AGENT_INTRO = "You are a Claude agent, built on Anthropic's Claude Agent SDK.";
+ 
+-export async function prepareAnthropicRequest(input, init = {}, { compatibility = true } = {}) {
+-  if (!compatibility) return init;
++async function inspectedJSON(input, init, path) {
+   const request = input instanceof Request ? input : null;
++  const signal = init.signal ?? request?.signal;
++  throwIfAborted(signal);
+   let url;
+-  try { url = new URL(request ? request.url : input); } catch { return init; }
+-  if (!/\/messages\/?$/.test(url.pathname)) return init;
++  try { url = new URL(request ? request.url : input); } catch { return null; }
++  if (!path.test(url.pathname) || (init.method ?? request?.method ?? "GET").toUpperCase() !== "POST") return null;
+   const headers = new Headers(request?.headers);
+   new Headers(init.headers ?? {}).forEach((v, k) => headers.set(k, v));
+-  if (headers.has("content-encoding") && headers.get("content-encoding").toLowerCase() !== "identity") return init;
+-  const mediaType = headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase();
+-  if (mediaType && mediaType !== "application/json" && !mediaType.endsWith("+json")) return init;
++  if (headers.has("content-encoding") && headers.get("content-encoding").toLowerCase() !== "identity") return null;
++  const type = headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase();
++  if (type && type !== "application/json" && !type.endsWith("+json")) return null;
+   let text = init.body;
+-  if (text == null && request) text = await readCloneText(request, {
+-    maxBytes: MAX_BODY, timeoutMs: 2000, signal: init.signal ?? request.signal,
+-  });
+-  if (typeof text !== "string" || text.length > MAX_BODY || new TextEncoder().encode(text).byteLength > MAX_BODY) return init;
++  if (text == null && request) text = await readCloneText(request, { maxBytes: MAX_BODY, timeoutMs: 2000, signal });
++  throwIfAborted(signal);
++  if (typeof text !== "string" || text.length > MAX_BODY || new TextEncoder().encode(text).byteLength > MAX_BODY) return null;
+   let body;
+-  try { body = JSON.parse(text); } catch { return init; }
+-  if (!body || typeof body !== "object" || Array.isArray(body)) return init;
++  try { body = JSON.parse(text); } catch { return null; }
++  return isRecord(body) ? { body, url, headers, signal } : null;
++}
++function changedBodyHeaders(headers) {
++  for (const name of ["content-length", "content-md5", "digest", "content-digest"]) headers.delete(name);
++}
++export async function prepareAnthropicRequest(input, init = {}, { compatibility = true } = {}) {
++  if (!compatibility) return init;
++  const parsed = await inspectedJSON(input, init, /\/messages\/?$/);
++  if (!parsed) return init;
++  const { body, url, headers } = parsed;
++  if (body.metadata !== undefined && !isRecord(body.metadata)) return init;
+   let changed = false;
+   if (typeof body.system === "string" && body.system.trim()) {
+     body.system = [
+       { type: "text", text: CLAUDE_SYSTEM_INTRO },
+       { type: "text", text: CLAUDE_AGENT_INTRO, cache_control: { type: "ephemeral" } },
+       { type: "text", text: body.system, cache_control: { type: "ephemeral" } },
+-    ];
+-    changed = true;
++    ]; changed = true;
+   }
+   const sessionId = headers.get("x-claude-code-session-id") || headers.get("x-session-id") || randomUUID();
+-  if (!body.context_management) body.context_management = { edits: [{ type: "clear_thinking_20251015", keep: "all" }] };
+-  if (!body.metadata || typeof body.metadata !== "object" || Array.isArray(body.metadata)) body.metadata = {};
+-  if (!body.metadata.user_id) {
+-    body.metadata.user_id = JSON.stringify({
+-      device_id: CLAUDE_DEVICE_ID, account_uuid: "", session_id: sessionId,
+-    });
+-    changed = true;
+-  }
++  headers.set("x-claude-code-session-id", sessionId);
++  if (body.context_management === undefined) { body.context_management = { edits: [{ type: "clear_thinking_20251015", keep: "all" }] }; changed = true; }
++  if (body.metadata === undefined) body.metadata = {};
++  if (body.metadata.user_id === undefined) { body.metadata.user_id = JSON.stringify({ device_id: CLAUDE_DEVICE_ID, account_uuid: "", session_id: sessionId }); changed = true; }
++  const original = url.href;
+   if (!url.searchParams.has("beta")) url.searchParams.set("beta", "true");
+-  if (!changed) return { ...init, headers, ...(url.href !== (request ? request.url : String(input)) ? { url: url.href } : {}) };
+-  for (const name of ["content-length", "content-md5", "digest", "content-digest"]) headers.delete(name);
+-  return { ...init, body: JSON.stringify(body), headers };
++  if (changed) changedBodyHeaders(headers);
++  return { ...init, headers, ...(changed ? { body: JSON.stringify(body) } : {}), ...(url.href !== original ? { url: url.href } : {}) };
+ }
+ 
+ export async function prepareCodexRequest(input, init = {}) {
+-  const request = input instanceof Request ? input : null;
+-  let pathname;
+-  try { pathname = new URL(request ? request.url : input).pathname; } catch { return init; }
+-  if (!pathname.endsWith("/responses") || (init.method ?? request?.method ?? "GET").toUpperCase() !== "POST") return init;
+-  const headers = new Headers(request?.headers);
+-  new Headers(init.headers ?? {}).forEach((v, k) => headers.set(k, v));
+-  if (headers.has("content-encoding") && headers.get("content-encoding").toLowerCase() !== "identity") return init;
+-  const mediaType = headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase();
+-  if (mediaType && mediaType !== "application/json" && !mediaType.endsWith("+json")) return init;
+-  let text = init.body;
+-  if (text == null && request) text = await readCloneText(request, {
+-    maxBytes: MAX_BODY, timeoutMs: 2000, signal: init.signal ?? request.signal,
+-  });
+-  if (typeof text !== "string" || text.length > MAX_BODY || new TextEncoder().encode(text).byteLength > MAX_BODY) return init;
+-  let body;
+-  try { body = JSON.parse(text); } catch { return init; }
+-  if (!body || typeof body !== "object" || Array.isArray(body)) return init;
+-
+-  const sessionId = headers.get("session-id") || headers.get("x-session-id") || randomUUID();
+-  const threadId = headers.get("thread-id") || sessionId;
+-  const turnId = randomUUID();
+-  const installationId = randomUUID();
++  const parsed = await inspectedJSON(input, init, /\/responses$/);
++  if (!parsed) return init;
++  const { body, headers } = parsed;
++  if (body.client_metadata !== undefined && !isRecord(body.client_metadata)) return init;
++  let changed = false;
++  const sessionId = headers.get("session-id") || headers.get("x-session-id") || body.prompt_cache_key || randomUUID();
++  const threadId = headers.get("thread-id") || sessionId, turnId = randomUUID();
+   const windowId = headers.get("x-codex-window-id") || `${sessionId}:0`;
+   const turnMetadata = headers.get("x-codex-turn-metadata") || JSON.stringify({
+-    installation_id: installationId, session_id: sessionId, thread_id: threadId, turn_id: turnId,
++    installation_id: CODEX_INSTALLATION_ID, session_id: sessionId, thread_id: threadId, turn_id: turnId,
+     window_id: windowId, request_kind: "turn", thread_source: "user", turn_started_at_unix_ms: Date.now(),
+   });
+-
+   if (typeof body.input === "string") {
+-    body.input = [{ type: "message", role: "user", content: [{ type: "input_text", text: body.input }] }];
++    body.input = [{ type: "message", role: "user", content: [{ type: "input_text", text: body.input }] }]; changed = true;
+   } else if (Array.isArray(body.input)) {
+     for (const item of body.input) {
+-      if (item && typeof item === "object" && typeof item.content === "string" &&
+-          (item.role === "user" || item.role === "developer" || item.role === "system" || item.role === "assistant")) {
+-        item.content = [{ type: "input_text", text: item.content }];
+-      }
++      if (!isRecord(item) || item.type !== undefined && item.type !== "message" ||
++          Object.keys(item).some(key => !["type", "id", "role", "content", "phase", "status"].includes(key)) ||
++          !["user", "assistant", "developer", "system"].includes(item.role) || typeof item.content !== "string") continue;
++      item.content = item.role === "assistant" ? [{type:"output_text",text:item.content,annotations:[]}] : [{type:"input_text",text:item.content}]; changed = true;
+     }
+   }
+-  if (!body.prompt_cache_key) body.prompt_cache_key = sessionId;
+-  if (!body.client_metadata || typeof body.client_metadata !== "object") body.client_metadata = {
+-    session_id: sessionId, thread_id: threadId, turn_id: turnId,
+-    "x-codex-installation-id": installationId, "x-codex-window-id": windowId,
+-    "x-codex-turn-metadata": turnMetadata,
+-  };
+-  if (!body.reasoning || typeof body.reasoning !== "object" || Array.isArray(body.reasoning)) {
+-    body.reasoning = { effort: "medium", context: "all_turns" };
+-  } else if (!body.reasoning.context) body.reasoning.context = "all_turns";
+-  if (body.stream === undefined) body.stream = true;
+-  if (body.store === undefined) body.store = false;
+-  if (body.tool_choice === undefined) body.tool_choice = "auto";
+-  if (body.parallel_tool_calls === undefined) body.parallel_tool_calls = false;
+-  if (!body.text || typeof body.text !== "object") body.text = { verbosity: "low" };
+-  if (!Array.isArray(body.include)) body.include = ["reasoning.encrypted_content"];
+-  if (!body.max_output_tokens && body.max_tokens) body.max_output_tokens = body.max_tokens;
+-  headers.set("x-codex-window-id", windowId);
+-  headers.set("x-codex-turn-metadata", turnMetadata);
+-  headers.set("x-client-request-id", headers.get("x-client-request-id") || sessionId);
+-  headers.set("session-id", sessionId);
+-  headers.set("thread-id", threadId);
+-  for (const name of ["content-length", "content-md5", "digest", "content-digest"]) headers.delete(name);
+-  return { ...init, body: JSON.stringify(body), headers };
++  const fill = (key, value) => { if (!Object.hasOwn(body, key)) { body[key] = value; changed = true; } };
++  fill("prompt_cache_key", sessionId);
++  fill("client_metadata", { session_id:sessionId, thread_id:threadId, turn_id:turnId,
++    "x-codex-installation-id":CODEX_INSTALLATION_ID, "x-codex-window-id":windowId, "x-codex-turn-metadata":turnMetadata });
++  // Never invent a reasoning effort or overwrite an explicit reasoning object.
++  fill("stream", true); fill("store", false); fill("tool_choice", "auto"); fill("parallel_tool_calls", false);
++  fill("text", {verbosity:"low"}); fill("include", ["reasoning.encrypted_content"]);
++  if (!Object.hasOwn(body, "max_output_tokens") && Number.isSafeInteger(body.max_tokens) && body.max_tokens > 0) {
++    body.max_output_tokens = body.max_tokens; delete body.max_tokens; changed = true;
++  }
++  for (const [name,value] of Object.entries({"x-codex-window-id":windowId,"x-codex-turn-metadata":turnMetadata,"x-client-request-id":sessionId,"session-id":sessionId,"thread-id":threadId})) {
++    if (!headers.has(name)) headers.set(name, value);
++  }
++  if (changed) changedBodyHeaders(headers);
++  return { ...init, headers, ...(changed ? {body:JSON.stringify(body)} : {}) };
+ }
+ 
+ export async function prepareResponsesRequest(input, init = {}) {
+@@ -157,6 +150,7 @@ export async function prepareResponsesRequest(input, init = {}) {
+ }
+ 
+ export async function prepareRequest(input, init = {}, { portableResponses = true, textFilter = null, sessionRepair = false } = {}) {
++  throwIfAborted(init.signal ?? (input instanceof Request ? input.signal : undefined));
+   if (!portableResponses && !textFilter && !sessionRepair) return init;
+   const request = input instanceof Request ? input : null;
+   let pathname;
+@@ -171,6 +165,7 @@ export async function prepareRequest(input, init = {}, { portableResponses = tru
+   if (text == null && request) text = await readCloneText(request, {
+     maxBytes: MAX_BODY, timeoutMs: 2000, signal: init.signal ?? request.signal,
+   });
++  throwIfAborted(init.signal ?? request?.signal);
+   if (typeof text !== "string" || text.length > MAX_BODY || new TextEncoder().encode(text).byteLength > MAX_BODY) return init;
+   let body;
+   try { body = JSON.parse(text); } catch { return init; }
+diff --git a/.trellis/tasks/11-23-harden-anyrouter/baseline/lib/response.mjs b/lib/response.mjs
+index cd3faa5..5b9425c 100644
+--- a/.trellis/tasks/11-23-harden-anyrouter/baseline/lib/response.mjs
++++ b/lib/response.mjs
+@@ -1,4 +1,5 @@
+ import { readCloneText } from "./body-inspection.mjs";
++import { isRecord, redactedMessage, throwIfAborted } from "./safety.mjs";
+ 
+ // Some relays commit HTTP 200 before they know whether a model can answer.
+ // Inspect only the bounded SSE prelude, before any answer or tool call escapes.
+@@ -58,7 +59,7 @@ function errorDetail(value, depth = 0) {
+ 
+ function streamHeaders(original) {
+   const h = new Headers(original);
+-  for (const k of ["content-length", "content-encoding", "transfer-encoding", "etag", "content-md5", "digest"]) h.delete(k);
++  for (const k of ["content-length", "content-encoding", "transfer-encoding", "etag", "content-md5", "digest", "content-digest", "repr-digest"]) h.delete(k);
+   return h;
+ }
+ 
+@@ -66,7 +67,7 @@ function changedHeaders(original) {
+   const h = new Headers(original);
+   h.set("content-type", "application/json");
+   // Fetch exposes decoded bytes, and the new body has a different length.
+-  for (const k of ["content-length", "content-encoding", "transfer-encoding", "etag", "content-md5", "digest"]) h.delete(k);
++  for (const k of ["content-length", "content-encoding", "transfer-encoding", "etag", "content-md5", "digest", "content-digest", "repr-digest"]) h.delete(k);
+   return h;
+ }
+ 
+@@ -102,7 +103,12 @@ function isBusinessError(e, depth = 0) {
+   return /invalid.{0,12}api.?key|unauthenticated|unauthorized|authentication|permission denied|forbidden|quota|balance|billing|payment required|content policy|content filter/i.test(message);
+ }
+ 
+-function transientFailureResponse(e, originalHeaders, retryAfterSeconds) {
++function diagnosticCode(value, fallback, account) {
++  if (typeof value === "string") return redactedMessage(value, account).slice(0, 128);
++  return Number.isSafeInteger(value) ? value : fallback;
++}
++
++function transientFailureResponse(e, originalHeaders, retryAfterSeconds, account) {
+   const numericStatus = [e.status, e.status_code, e.code].map(numericCode).find(value =>
+     TRANSIENT_STATUSES.includes(value));
+   const code = [e.code, e.type].find(value =>
+@@ -113,17 +119,17 @@ function transientFailureResponse(e, originalHeaders, retryAfterSeconds) {
+   const status = numericStatus ?? (rateLimited ? 429 : busy ? 503 : code === "server_error" ? 500 : null);
+   if (!status) return null;
+   return new Response(JSON.stringify({ error: {
+-    code: e.code ?? status,
++    code: diagnosticCode(e.code, status, account),
+     type: rateLimited ? "anyrouter_upstream_rate_limit" : busy ? "anyrouter_upstream_busy" : "anyrouter_upstream_error",
+     message: rateLimited
+       ? "AnyRouter 上游报告了速率限制。请按 Retry-After 或上游等待提示重试；插件未自动重试。"
+       : busy ? "AnyRouter 上游当前繁忙。请稍后再试；插件未自动重试。"
+         : "AnyRouter 上游报告了暂时性服务错误。请稍后再试；插件未自动重试。",
+-    upstream: typeof e.message === "string" ? e.message : "",
++    upstream: redactedMessage(typeof e.message === "string" ? e.message : "", account),
+   } }), { status, headers: status === 429 ? rateLimitHeaders(originalHeaders, retryAfterSeconds) : changedHeaders(originalHeaders) });
+ }
+ 
+-function failureResponse(value, originalHeaders, retryAfterSeconds) {
++function failureResponse(value, originalHeaders, retryAfterSeconds, account) {
+   const e = hasNestedError(value)
+     ? inheritErrorStatus(value, errorDetail(value.error ?? value.response?.error, 1))
+     : errorDetail(value);
+@@ -133,7 +139,7 @@ function failureResponse(value, originalHeaders, retryAfterSeconds) {
+   const foreignItem = /requested item was created under a different[^.]{0,100}OpenAI resource/i.test(message);
+   if (!blocked && !foreignItem && (isBusinessError(value) || isBusinessError(e))) return null;
+   const capped = !blocked && !foreignItem && TOKEN_RATE_LIMIT.test(message);
+-  if (!capped && !blocked && !foreignItem) return transientFailureResponse(e, originalHeaders, retryAfterSeconds);
++  if (!capped && !blocked && !foreignItem) return transientFailureResponse(e, originalHeaders, retryAfterSeconds, account);
+   const headers = capped ? rateLimitHeaders(originalHeaders, retryAfterSeconds) : changedHeaders(originalHeaders);
+   const wait = headers.get("retry-after");
+   const waitHint = /^[0-9]+$/.test(wait ?? "") ? `${wait} 秒后再试` : "按上游等待提示重试";
+@@ -146,10 +152,10 @@ function failureResponse(value, originalHeaders, retryAfterSeconds) {
+       ? `AnyRouter 的 Responses 历史条目属于另一个 OpenAI 资源${trace ? ` [trace_id=${trace}]` : ""}。请由客户端重发完整内联历史（store:false），或固定到创建该条目的同一上游资源；仅有 previous_response_id / item_reference 或不兼容的加密状态时，插件不能无损恢复。未自动重试。`
+       : `AnyRouter 的内容过滤器拒绝了这段请求内容${id ? ` (request id: ${id})` : ""}。请改写被拒的部分，或改用其他服务商。`;
+   return new Response(JSON.stringify({ error: {
+-    code: e.code ?? (capped ? "token_rate_limit" : foreignItem ? "resource_mismatch" : "content-blocked"),
+-    message: note,
++    code: diagnosticCode(e.code, capped ? "token_rate_limit" : foreignItem ? "resource_mismatch" : "content-blocked", account),
++    message: redactedMessage(note, account),
+     type: capped ? "anyrouter_token_rate_limit" : foreignItem ? "anyrouter_resource_mismatch" : "anyrouter_content_blocked",
+-    upstream: message,
++    upstream: redactedMessage(message, account),
+   } }), { status: capped ? 429 : 400, headers });
+ }
+ 
+@@ -200,10 +206,106 @@ function hasChatOutput(choice) {
+     (choice.logprobs !== undefined && choice.logprobs !== null);
+ }
+ 
+-// null means harmless prelude; true means release unchanged; Response is an
+-// explicit early failure. Looking only in error envelopes avoids matching text
+-// in a perfectly good answer that quotes an error message.
+-function inspectEvent(frame, headers, retryAfterSeconds) {
++function hasAnthropicOutput(block) {
++  if (!isRecord(block)) return true;
++  if (block.type !== "text" && block.type !== "thinking") return true;
++  const field = block.type === "text" ? "text" : "thinking";
++  if (Object.keys(block).some(k => !["type", field, "signature"].includes(k))) return true;
++  return typeof block[field] !== "string" || block[field].length > 0 || hasStringOutput(block.signature);
++}
++function hasSemanticOutput(value, depth = 0) {
++  // Unknown wrapper depth is not proof of an empty result. Release it without
++  // recursively walking an attacker-controlled tree up to the call-stack limit.
++  if (depth > 8) return true;
++  if (!isRecord(value)) return false;
++  for (const key of ["output", "content", "choices", "candidates"]) {
++    if (!Object.hasOwn(value, key)) continue;
++    const data = value[key];
++    if (!Array.isArray(data)) return true;
++    if (key === "output" ? data.some(hasOutput) : key === "choices" ? data.some(hasChatOutput) : key === "content" ? data.some(hasAnthropicOutput) : data.length > 0) return true;
++  }
++  if (isRecord(value.response) && hasSemanticOutput(value.response, depth + 1)) return true;
++  if (isRecord(value.message) && hasSemanticOutput(value.message, depth + 1)) return true;
++  if (Object.hasOwn(value, "content_block") && hasAnthropicOutput(value.content_block)) return true;
++  return false;
++}
++const onlyKeys = (value, keys) => isRecord(value) && Object.keys(value).every(key => keys.includes(key));
++const count = value => Number.isSafeInteger(value) && value >= 0;
++function provenUsage(value) {
++  if (value === undefined || value === null) return true;
++  const counts = ["input_tokens", "output_tokens", "total_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"];
++  if (!onlyKeys(value, [...counts, "input_tokens_details", "output_tokens_details", "cache_creation", "server_tool_use", "service_tier"])) return false;
++  if (counts.some(key => value[key] !== undefined && !count(value[key]))) return false;
++  for (const [name, fields] of Object.entries({ input_tokens_details: ["cached_tokens"], output_tokens_details: ["reasoning_tokens"],
++    cache_creation: ["ephemeral_5m_input_tokens", "ephemeral_1h_input_tokens"], server_tool_use: ["web_search_requests", "web_fetch_requests"] })) {
++    const nested = value[name];
++    if (nested !== undefined && (!onlyKeys(nested, fields) || Object.values(nested).some(v => !count(v)))) return false;
++  }
++  return value.service_tier === undefined || typeof value.service_tier === "string";
++}
++function provenEmptyUsage(value) {
++  if (!provenUsage(value) || value?.input_tokens !== 0 || value?.output_tokens !== 0) return false;
++  return Object.entries(value).every(([name, data]) => name === "service_tier" || data === 0 ||
++    isRecord(data) && Object.values(data).every(n => n === 0));
++}
++function provenResponsePrelude(type, value) {
++  const keys = {
++    "response.created": ["type", "response", "sequence_number"],
++    "response.in_progress": ["type", "response", "sequence_number"],
++    "response.completed": ["type", "response", "sequence_number"],
++    "response.output_item.added": ["type", "item", "output_index", "sequence_number"],
++    "response.output_item.done": ["type", "item", "output_index", "sequence_number"],
++    "response.content_part.added": ["type", "part", "item_id", "output_index", "content_index", "sequence_number"],
++  }[type];
++  if (!keys || !onlyKeys(value, keys) || value.sequence_number !== undefined && !count(value.sequence_number)) return false;
++  if (["response.created", "response.in_progress", "response.completed"].includes(type)) {
++    const r = value.response;
++    if (!onlyKeys(r, ["id", "object", "created_at", "status", "error", "incomplete_details", "instructions", "max_output_tokens", "model", "output", "parallel_tool_calls", "previous_response_id", "reasoning", "store", "temperature", "text", "tool_choice", "tools", "top_p", "truncation", "usage", "user", "metadata"])) return false;
++    if (!Array.isArray(r.output) || r.output.some(hasOutput) || r.error != null || r.incomplete_details != null || !provenUsage(r.usage)) return false;
++    const stringOrNull = data => data == null || typeof data === "string";
++    for (const name of ["id", "model", "instructions", "previous_response_id", "user", "truncation"]) if (!stringOrNull(r[name])) return false;
++    if (r.object != null && r.object !== "response" || r.created_at != null && !count(r.created_at)) return false;
++    for (const name of ["parallel_tool_calls", "store"]) if (r[name] != null && typeof r[name] !== "boolean") return false;
++    if (r.max_output_tokens != null && !count(r.max_output_tokens)) return false;
++    for (const name of ["temperature", "top_p"]) if (r[name] != null && (typeof r[name] !== "number" || !Number.isFinite(r[name]))) return false;
++    // Complex/future config shapes are not proof of an empty prelude. Releasing
++    // them is safer than discarding a signed state disguised as a known field.
++    if (r.tools != null && (!Array.isArray(r.tools) || r.tools.length)) return false;
++    if (r.tool_choice != null && !["auto", "none", "required"].includes(r.tool_choice)) return false;
++    if (r.metadata != null && (!isRecord(r.metadata) || Object.keys(r.metadata).length)) return false;
++    if (r.reasoning != null && (!onlyKeys(r.reasoning, ["effort", "summary"]) || !Object.values(r.reasoning).every(stringOrNull))) return false;
++    if (r.text != null) {
++      if (!onlyKeys(r.text, ["format", "verbosity"]) || !stringOrNull(r.text.verbosity)) return false;
++      if (r.text.format != null && (!onlyKeys(r.text.format, ["type"]) || r.text.format.type !== "text")) return false;
++    }
++    return r.status === undefined || (type === "response.completed" ? ["completed"] : ["queued", "in_progress"]).includes(r.status);
++  }
++  if (value.output_index !== undefined && !count(value.output_index) || value.content_index !== undefined && !count(value.content_index)) return false;
++  return type === "response.content_part.added" ? isRecord(value.part) && !hasPartOutput(value.part) : isRecord(value.item) && !hasOutput(value.item);
++}
++function provenAnthropicPrelude(type, value) {
++  const allowed = {
++    message_start: ["type", "message"], ping: ["type"],
++    content_block_start: ["type", "index", "content_block"], content_block_stop: ["type", "index"],
++    message_delta: ["type", "delta", "usage"],
++  }[type];
++  if (!allowed || Object.keys(value).some(k => !allowed.includes(k))) return false;
++  if (type === "message_start") {
++    const m = value.message;
++    return isRecord(m) && Array.isArray(m.content) && m.content.length === 0 &&
++      Object.keys(m).every(k => ["id", "type", "role", "content", "model", "stop_reason", "stop_sequence", "usage"].includes(k)) &&
++      (m.type === undefined || m.type === "message") && (m.role === undefined || m.role === "assistant") &&
++      !m.stop_reason && !m.stop_sequence && provenUsage(m.usage);
++  }
++  if (type === "content_block_start") return count(value.index) && !hasAnthropicOutput(value.content_block);
++  if (type === "message_delta") return onlyKeys(value.delta, ["stop_reason", "stop_sequence"]) &&
++    !value.delta.stop_reason && !value.delta.stop_sequence && provenUsage(value.usage);
++  return type !== "content_block_stop" || count(value.index);
++}
++
++// null means proven harmless prelude; true means release unchanged; Response is
++// an explicit early failure. Semantic or opaque contents win over error rewriting.
++function inspectEvent(frame, headers, retryAfterSeconds, account) {
+   const lines = frame.split(/\r\n|\n|\r/);
+   let name;
+   const dataLines = [];
+@@ -226,6 +328,7 @@ function inspectEvent(frame, headers, retryAfterSeconds) {
+   const namedFailure = name === "error" || name === "response.failed";
+   if (name && !knownTypes.includes(name)) return true;
+   if (!namedFailure && type && !knownTypes.includes(type)) return true;
++  if (hasSemanticOutput(j)) return true;
+   if (typeof j.delta === "string" && j.delta) return true;
+   // Anthropic content_block_delta carries an object, not a string.
+   if (j.type === "content_block_delta" && j.delta && typeof j.delta === "object" &&
+@@ -236,24 +339,21 @@ function inspectEvent(frame, headers, retryAfterSeconds) {
+   if (Array.isArray(j.response?.output) && j.response.output.some(hasOutput)) return true;
+   if (Array.isArray(j.choices) && j.choices.some(hasChatOutput)) return true;
+   const error = j.error ?? j.response?.error ?? ((type === "error" || type === "response.failed" || name === "error" || name === "response.failed") ? j : null);
+-  if (error) return failureResponse(j, headers, retryAfterSeconds) ?? true;
++  if (error) return failureResponse(j, headers, retryAfterSeconds, account) ?? true;
+   if (type === "response.completed") {
+     const r = j.response;
+-    if (r?.status === "completed" && Array.isArray(r.output) && r.output.length === 0 &&
+-        r.usage?.input_tokens === 0 && r.usage?.output_tokens === 0) return emptyResponse(headers);
++    if (provenResponsePrelude(type, j) && r?.status === "completed" && r.output.length === 0 &&
++        provenEmptyUsage(r.usage)) return emptyResponse(headers);
+     return true;
+   }
+-  if (Array.isArray(j.choices)) return null; // known chat role-only/usage prelude
+-  // Anthropic's prelude events carry no assistant content yet, so a failure
+-  // right after them is still an early failure worth classifying.
+-  if (["response.created", "response.in_progress", "response.output_item.added", "response.output_item.done", "response.content_part.added",
+-    "message_start", "ping", "message_delta", "content_block_start", "content_block_stop"].includes(type)) return null;
++  if (Array.isArray(j.choices) && onlyKeys(j, ["id", "object", "created", "model", "choices", "usage", "system_fingerprint", "service_tier"]) && provenUsage(j.usage)) return null;
++  if (provenAnthropicPrelude(type, j) || provenResponsePrelude(type, j)) return null;
+   return true; // unknown protocol or event: fail open, not data loss
+ }
+ 
+ // CR ends a line immediately; a following LF (even in the next chunk) belongs
+ // to that same ending. This also handles legal mixed newline event separators.
+-function eventScanner(headers, retryAfterSeconds) {
++function eventScanner(headers, retryAfterSeconds, account) {
+   let line = "", lines = [], afterCR = false;
+   return text => {
+     for (const char of text) {
+@@ -262,7 +362,7 @@ function eventScanner(headers, retryAfterSeconds) {
+       if (char !== "\r" && char !== "\n") { line += char; continue; }
+       afterCR = char === "\r";
+       if (line) { lines.push(line); line = ""; continue; }
+-      const result = inspectEvent(lines.join("\n"), headers, retryAfterSeconds);
++      const result = inspectEvent(lines.join("\n"), headers, retryAfterSeconds, account);
+       lines = [];
+       if (result !== null) return result;
+     }
+@@ -270,28 +370,39 @@ function eventScanner(headers, retryAfterSeconds) {
+   };
+ }
+ 
+-async function inspectStream(res, retryAfterSeconds) {
++async function inspectStream(res, retryAfterSeconds, signal, account) {
++  throwIfAborted(signal);
+   if (!res.body) return res;
+   const reader = res.body.getReader();
+   const chunks = [];
+-  const decoder = new TextDecoder();
+-  const scan = eventScanner(res.headers, retryAfterSeconds);
++  const decoder = new TextDecoder("utf-8", { fatal: true });
++  const scan = eventScanner(res.headers, retryAfterSeconds, account);
+   let bytes = 0, inflight, timer;
+   const expired = new Promise(resolve => { timer = setTimeout(() => resolve(null), PRELUDE_MS); });
+-  const cancel = reason => { void reader.cancel(reason).catch(() => {}); };
++  let transferred = false, onAbort;
++  const cleanup = () => signal?.removeEventListener("abort", onAbort);
++  const cancel = reason => { cleanup(); void reader.cancel(reason).catch(() => {}); };
++  const stopped = new Promise((_, reject) => {
++    onAbort = () => { cancel(signal.reason); reject(signal.reason); };
++    signal?.addEventListener("abort", onAbort, { once: true });
++  });
+   // Keep the in-flight read if the inspection deadline expires. A fresh read
+   // would skip that chunk; a tee/clone would buffer an unbounded unused branch.
+   try {
+     while (true) {
+       inflight = reader.read();
+-      const next = await Promise.race([inflight, expired]);
++      const next = await Promise.race([inflight, expired, stopped]);
++      throwIfAborted(signal);
+       if (next === null) break;
+       inflight = null;
+       if (next.done) break;
+       chunks.push(next.value);
+       bytes += next.value.byteLength;
+       if (bytes > PRELUDE_BYTES) break;
+-      const result = scan(decoder.decode(next.value, { stream: true }));
++      let text;
++      try { text = decoder.decode(next.value, { stream: true }); }
++      catch { return replay(); } // Invalid encoding is unknown data, not a synthetic error.
++      const result = scan(text);
+       if (result instanceof Response) { cancel("early upstream failure"); return result; }
+       if (result === true) return replay();
+     }
+@@ -301,39 +412,47 @@ async function inspectStream(res, retryAfterSeconds) {
+     throw error;
+   } finally {
+     clearTimeout(timer);
++    if (!transferred) cleanup();
+   }
+ 
+   function replay() {
++    transferred = true;
+     let i = 0;
+     return new Response(new ReadableStream({
+       async pull(controller) {
+-        if (i < chunks.length) { controller.enqueue(chunks[i++]); return; }
+         try {
+-          const next = await (inflight ?? reader.read());
++          throwIfAborted(signal);
++          if (i < chunks.length) { controller.enqueue(chunks[i++]); return; }
++          const next = await Promise.race([inflight ?? reader.read(), stopped]);
++          throwIfAborted(signal);
+           inflight = null;
+-          if (next.done) { reader.releaseLock(); controller.close(); }
++          if (next.done) { cleanup(); reader.releaseLock(); controller.close(); }
+           else controller.enqueue(next.value);
+-        } catch (error) { controller.error(error); }
++        } catch (error) { cancel(error); controller.error(error); }
+       },
+       cancel,
+     }), { status: res.status, statusText: res.statusText, headers: streamHeaders(res.headers) });
+   }
+ }
+ 
+-export async function explainResponse(res, { retryAfterSeconds } = {}) {
++export async function explainResponse(res, { retryAfterSeconds, signal, account } = {}) {
++  throwIfAborted(signal);
+   if (!res) return res;
+   const waitSeconds = retrySeconds(retryAfterSeconds);
++  const redactionAccount = isRecord(account) ? account : {};
+   const type = res.headers.get("content-type") ?? "";
+-  if (res.status === 200 && /text\/event-stream/i.test(type)) return inspectStream(res, waitSeconds);
++  if (res.status === 200 && /text\/event-stream/i.test(type)) return inspectStream(res, waitSeconds, signal, redactionAccount);
+   if (![200, 400, 429].includes(res.status)) return res;
+-  // JSON success responses can also carry an error envelope. Ordinary successful
+-  // replies, unknown failures and non-JSON content remain untouched.
++  // Only generated diagnostics are redacted. Semantic/opaque responses remain
++  // upstream bytes: silently scrubbing model output would violate preservation.
+   if (res.status === 200 && !/\bjson\b/i.test(type)) return res;
+-  const text = await readCloneText(res, { maxBytes: 64 * 1024, timeoutMs: 2000 });
++  const text = await readCloneText(res, { maxBytes: 64 * 1024, timeoutMs: 2000, signal });
++  throwIfAborted(signal);
+   if (text === null) return res;
+   let j;
+   try { j = JSON.parse(text); } catch { return res; }
++  if (hasSemanticOutput(j)) return res;
+   const error = j?.error ?? j?.response?.error ??
+     ((res.status >= 400 || j?.type === "error" || j?.type === "response.failed") ? j : null);
+-  return error ? failureResponse(j, res.headers, waitSeconds) ?? res : res;
++  return error ? failureResponse(j, res.headers, waitSeconds, redactionAccount) ?? res : res;
+ }
+diff --git a/lib/safety.mjs b/lib/safety.mjs
+new file mode 100644
+index 0000000..66a9fcb
+--- /dev/null
++++ b/lib/safety.mjs
+@@ -0,0 +1,56 @@
++export const ANYROUTER_ORIGIN = "https://anyrouter.top";
++export const isRecord = value => value !== null && typeof value === "object" && !Array.isArray(value);
++
++export function positiveId(value) {
++  const id = typeof value === "string" || typeof value === "number" ? String(value).trim() : "";
++  return /^[1-9]\d{0,15}$/.test(id) && Number.isSafeInteger(Number(id)) ? id : "";
++}
++
++export function usableModelKey(value) {
++  if (typeof value !== "string" || value.length > 4096) return false;
++  const key = value.trim();
++  return !!key && !/[^\x21-\x7e]|[*<>]|\.\.\./.test(key) &&
++    !["anyrouter", "your_api_key", "your-api-key", "opencode2-v1-key"].includes(key.toLowerCase());
++}
++
++export function trustedURL(value, { model = false, base = false } = {}) {
++  let url;
++  try { url = new URL(value instanceof Request ? value.url : value); } catch { throw new Error("AnyRouter 请求地址无效"); }
++  if (url.origin !== ANYROUTER_ORIGIN || url.username || url.password || url.hash ||
++      /%2f|%5c|%2e/i.test(url.pathname)) throw new Error("已阻止向非受信任地址发送 AnyRouter 凭据");
++  if (base && (url.search || !["/", "/v1", "/v1/", "/v1beta", "/v1beta/"].includes(url.pathname))) {
++    throw new Error("AnyRouter 模型基础地址必须为官方 /v1 地址");
++  }
++  if (model && !/^\/v1\/(?:responses(?:\/compact)?|chat\/completions|messages(?:\/count_tokens)?|models(?:\/[^/]+)?|dashboard\/billing\/(?:usage|subscription))\/?$/.test(url.pathname)) {
++    throw new Error("已阻止向未知接口发送模型 API Key");
++  }
++  return url;
++}
++
++export function throwIfAborted(signal) {
++  if (signal?.aborted) throw signal.reason ?? new DOMException("请求已取消", "AbortError");
++}
++
++export function deadlineSignal(signal, timeoutMs = 30000) {
++  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > 600000) throw new Error("请求超时配置无效");
++  throwIfAborted(signal);
++  const controller = new AbortController();
++  const abort = () => controller.abort(signal.reason);
++  signal?.addEventListener("abort", abort, { once: true });
++  const timer = setTimeout(() => controller.abort(new DOMException("请求超时", "TimeoutError")), timeoutMs);
++  return { signal: controller.signal, close() { clearTimeout(timer); signal?.removeEventListener("abort", abort); } };
++}
++
++export function redactedMessage(value, account = {}, extra = []) {
++  let text = typeof value === "string" ? value : "请求未能完成";
++  const secrets = [account.key, account.accessToken, account.password, account.session, ...extra].filter(v => typeof v === "string" && v);
++  for (const c of account.sessionState?.jar?.cookies ?? []) if (typeof c.value === "string" && c.value) secrets.push(c.value);
++  for (const pair of String(account.session ?? "").split(";")) {
++    const at = pair.indexOf("="); if (at > 0 && pair.slice(at + 1).trim()) secrets.push(pair.slice(at + 1).trim());
++  }
++  for (const secret of [...new Set(secrets)].sort((a, b) => b.length - a.length)) {
++    text = text.split(secret).join("[REDACTED]");
++    const encoded = encodeURIComponent(secret); if (encoded !== secret) text = text.split(encoded).join("[REDACTED]");
++  }
++  return text.replace(/\bsk-[A-Za-z0-9_-]{8,}/g, "[REDACTED]").replace(/[\x00-\x1f\x7f]/g, " ").slice(0, 500);
++}
+diff --git a/.trellis/tasks/11-23-harden-anyrouter/baseline/lib/session-repair.mjs b/lib/session-repair.mjs
+index 5aa08b9..d0047b5 100644
+--- a/.trellis/tasks/11-23-harden-anyrouter/baseline/lib/session-repair.mjs
++++ b/lib/session-repair.mjs
+@@ -88,6 +88,25 @@ export function repairSessionResources(body) {
+     if (changed) input = kept;
+   }
+   if (!changed) return unchanged;
++  if (Array.isArray(input)) {
++    // Once server context is detached, every output needs its earlier inline
++    // call of the same tool kind. A nonempty call_id alone is not a pairing.
++    const calls = new Set(), outputs = new Set();
++    for (const item of input) {
++      const call = item.type === "function_call" || item.type === "custom_tool_call";
++      const output = item.type === "function_call_output" || item.type === "custom_tool_call_output";
++      if (!call && !output) continue;
++      const family = item.type.startsWith("custom_") ? "custom" : "function";
++      const key = `${family}:${item.call_id}`;
++      const args = family === "custom" ? item.input : item.arguments;
++      if (typeof item.call_id !== "string" || !item.call_id ||
++          call && (calls.has(key) || typeof item.name !== "string" || !item.name || typeof args !== "string") ||
++          output && (!calls.has(key) || outputs.has(key) || !(typeof item.output === "string" || Array.isArray(item.output)))) {
++        throw new SessionRepairError("anyrouter_session_repair_opaque_tool", "清理后工具调用与结果关联不完整，请补齐明文历史或关闭清理；未发送请求。");
++      }
++      if (call) calls.add(key); else outputs.add(key);
++    }
++  }
+   if (typeof input === "string" ? !input.trim() : !input.length) throw emptyInputError();
+   const cleaned = { ...body, input };
+   delete cleaned.previous_response_id;
+diff --git a/.trellis/tasks/11-23-harden-anyrouter/baseline/lib/site-client.mjs b/lib/site-client.mjs
+index 1b8eb2d..a577347 100644
+--- a/.trellis/tasks/11-23-harden-anyrouter/baseline/lib/site-client.mjs
++++ b/lib/site-client.mjs
+@@ -1,610 +1,273 @@
+-import { SITES, assertSameUser, beijingDay, withSiteIdentity } from "./accounts.mjs";
++import { assertSameUser, beijingDay, withSiteIdentity } from "./accounts.mjs";
+ import { browserHeaders, customHeaders } from "./headers.mjs";
+-import { createContext, runInContext } from "node:vm";
++import { restoreSession, importCookieHeader, cookieHeader, applySetCookies, serializeSession, hasSession, mergeCookies } from "./cookies.mjs";
++import { ANYROUTER_ORIGIN, deadlineSignal, isRecord, positiveId, redactedMessage, throwIfAborted, trustedURL, usableModelKey } from "./safety.mjs";
+ 
++export { mergeCookies };
+ export class SiteError extends Error {
+   constructor(kind, message, details = {}) {
+-    super(message);
+-    this.name = "SiteError";
+-    this.kind = kind;
+-    this.status = details.status ?? 0;
+-    this.retryAfterMs = details.retryAfterMs ?? 0;
+-    this.data = details.data ?? null;
++    super(message); this.name = "SiteError"; this.kind = kind;
++    this.status = details.status ?? 0; this.retryAfterMs = details.retryAfterMs ?? 0;
+   }
+ }
+-
+ export function quotaNumber(value) {
+-  if ((typeof value !== "string" && typeof value !== "number") || String(value).trim() === "") return null;
+-  const number = Number(value);
+-  return Number.isFinite(number) ? number : null;
+-}
+-
+-export function mergeCookies(previous = "", responseHeaders) {
+-  const values = new Map();
+-  for (const pair of previous.split(";")) {
+-    const at = pair.indexOf("=");
+-    if (at > 0) values.set(pair.slice(0, at).trim(), pair.slice(at + 1).trim());
+-  }
+-  const separate = responseHeaders?.getSetCookie?.() ?? [];
+-  const lines = separate.length
+-    ? separate
+-    : (responseHeaders?.get("set-cookie") ?? "").split(/,(?=\s*[^;,=\s]+=)/);
+-  for (const line of lines) {
+-    const pair = /^\s*([^=;,\s]+)=([^;]*)/.exec(line);
+-    if (!pair) continue;
+-    if (/;\s*max-age\s*=\s*0\s*(?:;|$)/i.test(line) || !pair[2]) values.delete(pair[1]);
+-    else values.set(pair[1], pair[2]);
+-  }
+-  return [...values].map(([name, value]) => `${name}=${value}`).join("; ");
+-}
+-
+-function mergeCookieStrings(...sources) {
+-  const values = new Map();
+-  for (const source of sources) {
+-    for (const pair of String(source || "").split(";")) {
+-      const at = pair.indexOf("=");
+-      if (at > 0) values.set(pair.slice(0, at).trim(), pair.slice(at + 1).trim());
+-    }
+-  }
+-  return [...values].map(([name, value]) => `${name}=${value}`).join("; ");
++  if (!(typeof value === "number" || typeof value === "string" && /^-?\d+(?:\.\d+)?$/.test(value.trim()))) return null;
++  const number = Number(value); return Number.isFinite(number) ? number : null;
+ }
+-
+ function retryAfterMs(headers) {
+-  let result = 0;
++  let wait = 0;
+   for (const name of ["retry-after-ms", "x-ms-retry-after-ms"]) {
+-    const raw = headers?.get?.(name);
+-    if (raw === null || raw === undefined) continue;
+-    const value = Number(raw);
+-    if (Number.isFinite(value) && value >= 0) result = Math.max(result, value);
+-  }
+-  const retryAfter = headers?.get?.("retry-after");
+-  if (retryAfter !== null && retryAfter !== undefined) {
+-    const seconds = Number(retryAfter);
+-    const value = Number.isFinite(seconds) ? seconds * 1000 : Date.parse(retryAfter) - Date.now();
+-    if (Number.isFinite(value) && value >= 0) result = Math.max(result, value);
+-  }
+-  return result;
+-}
+-
+-function isShieldChallenge(response, raw) {
+-  const contentType = response?.headers?.get?.("content-type") || "";
+-  const text = String(raw || "");
+-  if (/text\/html/i.test(contentType) &&
+-      /var\s+arg1\s*=|acw_sc__v2|cdn_sec_tc|challenge-platform|<script/i.test(text)) {
+-    return true;
++    const raw = headers?.get?.(name); if (raw != null && /^\d+$/.test(raw)) wait = Math.max(wait, Number(raw));
+   }
+-  return /var\s+arg1\s*=/.test(text);
++  const raw = headers?.get?.("retry-after");
++  if (raw) { const n = /^\d+$/.test(raw) ? Number(raw) * 1000 : Date.parse(raw) - Date.now(); if (Number.isFinite(n)) wait = Math.max(wait, n); }
++  return Math.min(Math.max(0, wait), 86400000);
+ }
+-
+-const CHALLENGE_SCRIPT_LIMIT = 128 * 1024;
+-
++const ARG1 = /\b(?:var|let|const)\s+arg1\s*=\s*(['"])([0-9a-fA-F]{40})\1/g;
++const UNSBOX = [15,35,29,24,33,16,1,38,10,9,19,31,40,27,22,23,25,13,6,11,39,18,20,8,14,21,32,26,2,30,7,4,17,5,3,28,34,37,12,36];
++const XOR = Buffer.from("3000176000856006061501533003690027800375", "hex");
++// Untrusted HTML is data only. No VM, eval, Function or remote-script runner.
+ export function solveWafChallenge(raw) {
+-  const html = String(raw || "");
+-  if (!html || html.length > CHALLENGE_SCRIPT_LIMIT * 2) return "";
+-  const scripts = [...html.matchAll(/<script\b(?![^>]*\bsrc\s*=)[^>]*>([\s\S]*?)<\/script>/gi)]
+-    .map(match => match[1]);
+-  for (const script of scripts) {
+-    if (script.length > CHALLENGE_SCRIPT_LIMIT ||
+-        !/\barg1\s*=/.test(script) || !/acw_sc__v2/.test(script)) continue;
+-    let cookie = "";
+-    const document = {
+-      get cookie() {
+-        return cookie;
+-      },
+-      set cookie(value) {
+-        const match = /(?:^|;\s*)acw_sc__v2=([^;]+)/i.exec(String(value));
+-        if (match && /^[A-Za-z0-9._~-]{1,512}$/.test(match[1])) {
+-          cookie = `acw_sc__v2=${match[1]}`;
+-        }
+-      },
+-      location: { reload() {} },
+-      body: { appendChild() {} },
+-      createElement() {
+-        return { style: {}, appendChild() {}, setAttribute() {}, remove() {} };
+-      }
+-    };
+-    const window = {
+-      document,
+-      location: document.location,
+-      navigator: { userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36" }
+-    };
+-    const context = createContext({
+-      document,
+-      window,
+-      self: window,
+-      top: window,
+-      parent: window,
+-      location: document.location,
+-      navigator: window.navigator,
+-      setTimeout() { return 0; },
+-      clearTimeout() {},
+-      console: { log() {}, warn() {}, error() {} }
+-    });
+-    try {
+-      runInContext(script, context, { timeout: 1000 });
+-    } catch {
+-      continue;
+-    }
+-    if (cookie) return cookie;
+-  }
+-  return "";
++  if (typeof raw !== "string" || Buffer.byteLength(raw) > 256 * 1024) return "";
++  const matches = [...raw.matchAll(ARG1)];
++  if (matches.length !== 1) return "";
++  const shuffled = Buffer.from(UNSBOX.map(i => matches[0][2][i - 1]).join(""), "hex");
++  for (let i = 0; i < shuffled.length; i++) shuffled[i] ^= XOR[i];
++  return `acw_sc__v2=${shuffled.toString("hex")}`;
+ }
+-
+ const CAPTCHA_RE = /captcha|turnstile|验证码|人机验证|challenge-platform|cf-chl|aliyun_waf_aa/i;
+-const FORBIDDEN_RE = /无权|权限不足|禁止|封禁|banned|forbidden|permission denied|access denied/i;
+-const RATE_RE = /请求次数过多|请求过多|限流|稍后再试|too many requests|rate.?limit|负载已饱和|负载已满|系统繁忙|繁忙|overloaded|server busy/i;
+-const INACTIVE_RE = /未开启签到|签到.*未开启|签到.*关闭|没有签到|不支持.*签到|签到.*不支持|活动.*未开启|活动.*结束|not support.*checkin|checkin.*not supported|inactive/i;
+-const ALREADY_RE = /已签到|已经签到|今日已|今天已|重复签到|已领取|already (?:signed|checked)|checked.?in today|no.?reward/i;
+-const CREDENTIAL_RE = /密码错误|用户名或密码|账号或密码|incorrect password|wrong password|未登录|登录已过期|登录失效|invalid (?:password|credential|token)|unauthorized|not logged/i;
+-const SITE_HEADER_NAMES = new Set([
+-  "cookie", "new-api-user", "user-agent", "accept-language", "accept", "x-requested-with",
+-  "sec-ch-ua", "sec-ch-ua-mobile", "sec-ch-ua-platform", "sec-fetch-dest", "sec-fetch-mode",
+-  "sec-fetch-site", "priority"
+-]);
+-
++const FORBIDDEN_RE = /权限不足|封禁|banned|forbidden|permission denied|access denied/i;
++const RATE_RE = /请求次数过多|请求过多|限流|too many requests|rate.?limit|负载已饱和|负载已满|系统繁忙|overloaded|server busy/i;
++const INACTIVE_RE = /未开启签到|签到.*未开启|签到.*关闭|不支持.*签到|签到.*不支持|活动.*未开启|活动.*结束|not support.*checkin|checkin.*not supported|inactive/i;
++const ALREADY_RE = /已签到|已经签到|重复签到|(?:今日|今天)已(?:签|领)|已领取|already (?:signed|checked)|checked.?in today|no.?reward/i;
++const CREDENTIAL_RE = /密码错误|用户名或密码|账号或密码|incorrect password|wrong password|未登录|登录已过期|登录失效|(?:access\s*)?token\s*无效|invalid (?:password|credential|token)|unauthorized|not logged/i;
++const SITE_HEADER_NAMES = new Set(["user-agent", "accept-language", "accept", "x-requested-with", "sec-ch-ua", "sec-ch-ua-mobile", "sec-ch-ua-platform", "sec-fetch-dest", "sec-fetch-mode", "sec-fetch-site", "priority"]);
++function isShieldChallenge(response, raw) {
++  return /text\/html/i.test(response?.headers?.get?.("content-type") ?? "") || /^\s*</.test(raw ?? "") || /denied/i.test(response?.headers?.get?.("x-tengine-error") ?? "");
++}
+ export function classifySiteMessage(message, status = 0) {
+-  const value = String(message || "");
+-  if (ALREADY_RE.test(value)) return "done";
+-  if (CAPTCHA_RE.test(value)) return "captcha";
+-  if (INACTIVE_RE.test(value)) return "inactive";
+-  if (FORBIDDEN_RE.test(value) || status === 403) return "ineligible";
+-  if (status === 401 || CREDENTIAL_RE.test(value)) return "ineligible";
+-  if (status === 404 || status === 405) return "inactive";
+-  if (status === 429 || RATE_RE.test(value)) return "failed";
++  const text = String(message || "");
++  if (CAPTCHA_RE.test(text)) return "captcha";
++  if (CREDENTIAL_RE.test(text) || status === 401 || FORBIDDEN_RE.test(text) || status === 403) return "ineligible";
++  if (ALREADY_RE.test(text)) return "done";
++  if (INACTIVE_RE.test(text) || status === 404 || status === 405) return "inactive";
++  if (status === 429 || RATE_RE.test(text)) return "failed";
+   return null;
+ }
+-
+-function siteFailure(response, data, raw, operation) {
++function siteFailure(response, data, raw, operation, account = {}) {
+   const status = response?.status ?? 0;
+-  const message = String(data?.message ?? data?.error?.message ?? data?.msg ?? "").trim();
+-  const combined = `${message} ${String(raw || "").slice(0, 4000)}`;
+-  const details = { status, retryAfterMs: retryAfterMs(response?.headers), data };
+-  const tengine = String(response?.headers?.get?.("x-tengine-error") || "");
+-
+-  if (/http_ratelimit/i.test(tengine)) {
+-    return new SiteError("rate-limit", "AnyRouter 站点请求被限流，请稍后再试。", details);
+-  }
+-  if (/denied/i.test(tengine) && !isShieldChallenge(response, raw)) {
+-    return new SiteError("waf", "AnyRouter 返回了 WAF 拦截页；请在浏览器完成验证后更新会话。", details);
+-  }
+-  if (isShieldChallenge(response, raw)) {
+-    return new SiteError("waf", "AnyRouter 返回了 WAF/JS 盾验证页，自动挑战未完成。请改用“AnyRouter 浏览器会话（WAF/JS 盾请用此入口；可签到）”入口，在浏览器完成验证后导入 /api/user/self。", details);
+-  }
+-  if (CAPTCHA_RE.test(combined)) {
+-    return new SiteError("captcha", "站点要求 Turnstile/验证码，插件不会代解；请在浏览器完成后重试。", details);
+-  }
+-  if (ALREADY_RE.test(message)) {
+-    return new SiteError("already", message || "今天已经签到。", details);
+-  }
+-  if (INACTIVE_RE.test(message) || status === 404 || status === 405) {
+-    return new SiteError("inactive", message || "站点当前没有可用的签到接口。", details);
+-  }
+-  if (status === 401 || CREDENTIAL_RE.test(message)) {
+-    return new SiteError("credentials", `站点拒绝了 ${operation}；请重新连接该账号。`, details);
+-  }
+-  if (status === 403 && !data) {
+-    return new SiteError("forbidden", "站点拒绝了该操作（HTTP 403），请确认账号权限或稍后重试。", details);
+-  }
+-  if (status === 403 || FORBIDDEN_RE.test(message)) {
+-    return new SiteError("forbidden", message || "账号没有执行该站点操作的权限。", details);
+-  }
+-  if (status === 429 || RATE_RE.test(message)) {
+-    return new SiteError("rate-limit", message || "站点对该操作限流，请稍后再试。", details);
+-  }
+-  if (status >= 500) {
+-    return new SiteError("unavailable", `站点暂时不可用（HTTP ${status}），请稍后再试。`, details);
+-  }
+-  if (status === 0) {
+-    return new SiteError("unavailable", "站点请求失败或超时。", details);
+-  }
+-  if (message) {
+-    return new SiteError("unavailable", message, details);
+-  }
+-  return new SiteError("unavailable", `站点未能完成 ${operation}（HTTP ${status}）。`, details);
++  const message = isRecord(data) ? String(data.message ?? data.error?.message ?? data.msg ?? "") : "";
++  const details = { status, retryAfterMs: retryAfterMs(response?.headers) };
++  const tengine = response?.headers?.get?.("x-tengine-error") ?? "";
++  if (/http_ratelimit/i.test(tengine)) return new SiteError("rate-limit", "AnyRouter 站点请求被限流，请稍后再试。", details);
++  if (CAPTCHA_RE.test(message) || CAPTCHA_RE.test(raw ?? "")) return new SiteError("captcha", "站点要求验证码，请在浏览器完成验证。", details);
++  if (isShieldChallenge(response, raw) && (status < 500 || /denied/i.test(tengine) || /\barg1\s*=/.test(raw ?? ""))) {
++    return new SiteError("waf", "AnyRouter 返回 WAF 验证页；请在相同网络出口的浏览器完成验证后更新会话。", details);
++  }
++  if (CREDENTIAL_RE.test(message) || status === 401) return new SiteError("credentials", "站点拒绝了登录凭据，请重新连接该账号。", details);
++  if (status === 403 || FORBIDDEN_RE.test(message)) return new SiteError("forbidden", "账号没有执行该站点操作的权限。", details);
++  if (ALREADY_RE.test(message)) return new SiteError("already", "今天已经签到。", details);
++  if (INACTIVE_RE.test(message) || status === 404 || status === 405) return new SiteError("inactive", "站点当前没有可用的签到接口。", details);
++  if (status === 429 || RATE_RE.test(message)) return new SiteError("rate-limit", "站点对该操作限流，请稍后再试。", details);
++  // Arbitrary upstream text is never an exception message; it may echo a secret.
++  return new SiteError("unavailable", `站点未能完成${operation}（HTTP ${status}），请稍后重试。`, details);
+ }
+ 
+-export async function readBoundedText(response, limit = 2 * 1024 * 1024) {
+-  const reader = response.body?.getReader();
+-  if (!reader) return "";
+-  const decoder = new TextDecoder();
+-  let size = 0;
+-  let text = "";
++export async function readBoundedText(response, limit = 2 * 1024 * 1024, { signal, timeoutMs = 30000 } = {}) {
++  const budget = deadlineSignal(signal, timeoutMs);
++  let reader, abort;
+   try {
+-    while (true) {
+-      const { done, value } = await reader.read();
+-      if (done) return text + decoder.decode();
+-      size += value.byteLength;
+-      if (size > limit) throw new SiteError("unavailable", "站点响应超过了账号 API 的大小上限。");
+-      text += decoder.decode(value, { stream: true });
++    throwIfAborted(budget.signal);
++    reader = response.body?.getReader(); if (!reader) return "";
++    const stopped = new Promise((_, reject) => { abort = () => reject(budget.signal.reason); budget.signal.addEventListener("abort", abort, { once: true }); });
++    const decoder = new TextDecoder("utf-8", { fatal: true });
++    let bytes = 0, text = "";
++    for (;;) {
++      throwIfAborted(budget.signal);
++      const next = await Promise.race([reader.read(), stopped]);
++      if (next.done) return text + decoder.decode();
++      bytes += next.value.byteLength;
++      if (bytes > limit) throw new SiteError("unavailable", "站点响应超过大小上限。");
++      text += decoder.decode(next.value, { stream: true });
+     }
+   } finally {
+-    await reader.cancel().catch(() => {});
++    budget.signal.removeEventListener("abort", abort); budget.close();
++    if (reader) void reader.cancel().catch(() => {});
+   }
+ }
+-
+ function safeSiteHeaders(value) {
+   if (!value) return {};
+-  const result = {};
+-  let headers;
+-  try {
+-    headers = new Headers(value);
+-  } catch {
+-    return result;
+-  }
+-  for (const name of SITE_HEADER_NAMES) {
+-    if (name === "cookie" || name === "new-api-user") continue;
+-    if (headers.has(name)) result[name] = headers.get(name);
+-  }
+-  return result;
++  const out = {}; let headers;
++  try { headers = new Headers(value); } catch { throw new SiteError("config", "站点请求头格式无效"); }
++  for (const name of SITE_HEADER_NAMES) if (headers.has(name)) out[name] = headers.get(name);
++  return out;
+ }
+-
+-export function parseSessionHandoff(value, { allowedOrigins = Object.values(SITES) } = {}) {
+-  const text = String(value ?? "").trim();
+-  if (!text || text.length > 65536) {
+-    throw new SiteError("credentials", "粘贴有边界的 AnyRouter 会话导出，或 Copy as cURL 请求文本。");
+-  }
+-
+-  let cookie;
+-  let userId;
+-  let siteHeaders = {};
++export function parseSessionHandoff(value) {
++  if (typeof value !== "string" || Buffer.byteLength(value) > 65536 || !value.trim()) throw new SiteError("credentials", "请粘贴本站 /api/user/self 的 cURL 或 JSON 会话导出。");
++  const text = value.trim(); let cookie, userId, siteHeaders = {};
+   if (text.startsWith("{")) {
+-    let data;
+-    try {
+-      data = JSON.parse(text);
+-    } catch {
+-      throw new SiteError("credentials", "会话导出不是合法的 JSON。");
+-    }
+-    if (!data || typeof data !== "object" || Array.isArray(data)) {
+-      throw new SiteError("credentials", "会话导出必须是一个对象。");
+-    }
+-    cookie = data.cookie ?? data.cookies;
+-    userId = String(data.userId ?? data.user_id ?? "");
++    let data; try { data = JSON.parse(text); } catch { throw new SiteError("credentials", "会话导出不是合法 JSON。"); }
++    if (!isRecord(data)) throw new SiteError("credentials", "会话导出必须是对象。");
++    cookie = data.cookie ?? data.cookies; userId = positiveId(data.userId ?? data.user_id);
+     siteHeaders = safeSiteHeaders(data.siteHeaders ?? data.headers);
+   } else {
+-    // Clipboard text is data, never a command. Only a site self request and
+-    // the minimum browser headers are accepted. DevTools emits both
+-    // `curl '<url>'` and `curl --url '<url>'` shapes; the origin, path and
+-    // credential checks below stay strict either way.
+-    if (!/^curl(?:\.exe)?\b/.test(text)) {
+-      throw new SiteError("credentials", "请粘贴浏览器 DevTools 复制的 cURL 命令文本。");
+-    }
+-    const target = /(['"])(https:\/\/[^'"\s]+)\1/.exec(text);
+-    let url;
+-    try {
+-      url = new URL(target?.[2]);
+-    } catch {}
+-    if (!url || !allowedOrigins.includes(url.origin) || url.pathname !== "/api/user/self" || url.username || url.password) {
+-      throw new SiteError("credentials", "请复制 AnyRouter 的 /api/user/self 请求，而不是 GitHub 或 LinuxDO 的请求。");
+-    }
+-    const headers = new Headers();
+-    for (const match of text.matchAll(/(?:^|\s)(?:-H|--header)\s+(?:'([^'\r\n]*)'|"([^"\r\n]*)")/g)) {
+-      const value = match[1] ?? match[2];
+-      const at = value.indexOf(":");
+-      if (at <= 0) continue;
+-      const name = value.slice(0, at).trim().toLowerCase();
+-      if (SITE_HEADER_NAMES.has(name)) {
+-        try {
+-          headers.set(name, value.slice(at + 1).trim());
+-        } catch {
+-          throw new SiteError("credentials", "导出的站点请求头无效。");
+-        }
++    if (!/^curl(?:\.exe)?\b/.test(text)) throw new SiteError("credentials", "请粘贴 DevTools 的 cURL 请求文本（不会执行命令）。");
++    const match = /(['"])(https:\/\/[^'"\s]+)\1/.exec(text);
++    let url; try { url = trustedURL(match?.[2]); } catch {}
++    if (!url || url.pathname !== "/api/user/self" || url.search || url.hash) throw new SiteError("credentials", "只能导入 AnyRouter 的 /api/user/self 请求。");
++    const h = new Headers();
++    for (const m of text.matchAll(/(?:^|\s)(?:-H|--header)\s+(?:'([^'\r\n]*)'|"([^"\r\n]*)")/g)) {
++      const raw = m[1] ?? m[2], at = raw.indexOf(":"); if (at < 1) continue;
++      const name = raw.slice(0, at).trim().toLowerCase();
++      if (["cookie", "new-api-user"].includes(name) || SITE_HEADER_NAMES.has(name)) {
++        try { h.set(name, raw.slice(at + 1).trim()); } catch { throw new SiteError("credentials", "站点请求头无效。"); }
+       }
+     }
+-    const cookies = /(?:^|\s)(?:-b|--cookie)\s+(['"])([^'"\r\n]*)\1/.exec(text);
+-    cookie = headers.get("cookie") || cookies?.[2];
+-    userId = headers.get("new-api-user") || "";
+-    for (const name of SITE_HEADER_NAMES) {
+-      if (name === "cookie" || name === "new-api-user") continue;
+-      if (headers.has(name)) siteHeaders[name] = headers.get(name);
+-    }
+-  }
+-
+-  if (typeof cookie !== "string" || !/(?:^|;\s*)session=[^;\s]+/.test(cookie) || /[\r\n]/.test(cookie) ||
+-      !/^\d+$/.test(userId)) {
+-    throw new SiteError("credentials", "导出必须包含 AnyRouter 的 session Cookie、可选 WAF Cookie，以及数字形式的 New-Api-User ID。");
++    cookie = h.get("cookie") || /(?:^|\s)(?:-b|--cookie)\s+(['"])([^'"\r\n]*)\1/.exec(text)?.[2];
++    userId = positiveId(h.get("new-api-user")); siteHeaders = safeSiteHeaders(h);
+   }
+-  return { session: cookie, userId, siteHeaders };
++  let jar; try { jar = importCookieHeader(cookie); } catch { throw new SiteError("credentials", "导出必须包含有效的 Cookie 格式。"); }
++  const state = serializeSession(jar);
++  if (!userId || !hasSession({ sessionState: state })) throw new SiteError("credentials", "导出必须包含有效的 session Cookie 和正整数 New-Api-User ID。");
++  return { session: cookie, userId, siteHeaders, sessionState: state };
+ }
+ 
+ export function createSiteClient({ fetchImpl = (...args) => fetch(...args), timeoutMs = 30000, now = Date.now } = {}) {
+-  async function requestRaw(account, path, options = {}) {
+-    const {
+-      body,
+-      anonymous = false,
+-      cookies = "",
+-      signal,
+-      operation = "account read",
+-      navigation = false,
+-      allowChallenge = true,
+-      // A POST may already have run before a challenge page is returned. Only
+-      // GETs, and callers that explicitly vouch for a pre-side-effect POST
+-      // (password login), may solve and retry. sign_in never does.
+-      retryChallenge = options.body === undefined
+-    } = options;
+-    if (account.siteURL !== SITES.top) {
+-      throw new SiteError("credentials", "AnyRouter 登录和站点接口只支持 anyrouter.top。");
+-    }
+-    const headers = browserHeaders();
+-    headers.set("referer", account.siteURL + (navigation ? "/login" : "/"));
+-    if (navigation) {
+-      headers.set("accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8");
+-      headers.set("cache-control", "max-age=0");
+-      headers.set("sec-fetch-dest", "document");
+-      headers.set("sec-fetch-mode", "navigate");
+-      headers.set("sec-fetch-site", "none");
+-      headers.set("upgrade-insecure-requests", "1");
+-      headers.delete("priority");
+-    } else {
+-      headers.set("cache-control", "no-store");
+-    }
+-    if (body !== undefined) headers.set("origin", account.siteURL);
+-    if (operation === "daily sign-in") headers.set("x-requested-with", "XMLHttpRequest");
+-    customHeaders(account.headers).forEach((value, name) => headers.set(name, value));
+-    customHeaders(account.siteHeaders).forEach((value, name) => headers.set(name, value));
+-
+-    const cookie = cookies || (anonymous ? "" : account.session);
+-    if (cookie) headers.set("cookie", cookie);
+-    if (!anonymous) {
+-      if (account.accessToken) headers.set("authorization", account.accessToken);
+-      if (account.userId) headers.set("new-api-user", account.userId);
+-    } else {
+-      headers.set("new-api-user", "-1");
+-    }
+-    if (body !== undefined) headers.set("content-type", "application/json");
+-
+-    const controller = new AbortController();
+-    const abort = () => controller.abort(signal.reason);
+-    if (signal?.aborted) abort();
+-    else signal?.addEventListener("abort", abort, { once: true });
+-    const timer = setTimeout(() => controller.abort(), timeoutMs);
+-    try {
+-    const response = await fetchImpl(account.siteURL + path, {
+-        method: body === undefined ? "GET" : "POST",
+-        headers,
+-        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+-        redirect: "error",
+-        signal: controller.signal
+-      });
+-      const raw = await readBoundedText(response);
+-      let data;
+-      try {
+-        data = JSON.parse(raw);
+-      } catch {}
+-      const result = {
+-        response,
+-        raw,
+-        data,
+-        cookies: mergeCookies(cookie, response.headers),
+-        status: response.status
+-      };
+-      if (allowChallenge && retryChallenge && isShieldChallenge(response, raw)) {
+-        const challengeCookie = solveWafChallenge(raw);
+-        if (challengeCookie) {
+-          return requestRaw(account, path, {
+-            ...options,
+-            cookies: mergeCookieStrings(cookie, result.cookies, challengeCookie),
+-            allowChallenge: false,
+-            retryChallenge: false
+-          });
+-        }
++  function openSession(initial, { signal, beforeMutation } = {}) {
++    if (initial.siteURL !== ANYROUTER_ORIGIN) throw new SiteError("config", "站点接口只支持 anyrouter.top。");
++    let account = { ...initial }, jar;
++    try { jar = restoreSession(account, now()); } catch { throw new SiteError("config", "Cookie 状态损坏，请重新导入会话。"); }
++    const budget = deadlineSignal(signal, timeoutMs);
++    let identityMismatch = false;
++    const snapshot = () => serializeSession(jar, now());
++    const current = () => ({ ...account, sessionState: snapshot(), session: cookieHeader(jar, `${account.siteURL}/api/user/self`, now()) });
++    const checkIdentity = user => {
++      try { account = withSiteIdentity(account, user); } catch {
++        identityMismatch = true; throw new SiteError("identity", "站点返回的用户 ID 不一致，未更新当前账号。");
+       }
+-      return result;
+-    } catch (error) {
+-      if (signal?.aborted) throw signal.reason;
+-      if (error instanceof SiteError) throw error;
+-      throw new SiteError("unavailable", "站点请求失败或超时；未执行自动重试登录。");
+-    } finally {
+-      clearTimeout(timer);
+-      signal?.removeEventListener("abort", abort);
+-    }
+-  }
+-
+-  async function request(account, path, options = {}) {
+-    const result = await requestRaw(account, path, options);
+-    if (!result.response.ok || !result.data || result.data.success !== true) {
+-      throw siteFailure(result.response, result.data, result.raw, options.operation || "account read");
+-    }
+-    return { data: result.data.data, cookies: result.cookies, raw: result.raw, response: result.response };
+-  }
+-
+-  async function status(account, signal, cookies = account.session) {
+-    return request(account, "/api/status", {
+-      anonymous: true,
+-      cookies,
+-      signal,
+-      operation: "site status read"
+-    });
+-  }
+-
+-  async function bootstrapLoginPage(account, signal) {
+-    return requestRaw(account, "/login", {
+-      anonymous: true,
+-      cookies: account.session,
+-      signal,
+-      navigation: true,
+-      operation: "login page bootstrap"
+-    });
+-  }
+-
+-  async function login(account, signal) {
+-    if (!account.username || !account.password) {
+-      throw new SiteError("credentials", "需要提供 AnyRouter 站点用户名和密码。");
+-    }
+-    let bootstrap;
+-    let siteStatus;
+-    try {
+-      siteStatus = await status(account, signal);
+-    } catch (error) {
+-      if (error?.kind !== "waf") throw error;
+-      bootstrap = await bootstrapLoginPage(account, signal);
+-      siteStatus = await status(account, signal, bootstrap.cookies);
+-    }
+-    if (siteStatus.data?.turnstile_check === true) {
+-      throw new SiteError("captcha", "AnyRouter 当前开启了 Turnstile；请在浏览器登录后导入站点会话。");
+-    }
+-    const loginOptions = cookies => ({
+-      anonymous: true,
+-      cookies,
+-      body: { username: account.username, password: account.password },
+-      signal,
+-      operation: "password login",
+-      // Password login has no account side effect before authentication; a
+-      // known JS challenge may be solved and replayed once.
+-      retryChallenge: true
+-    });
+-    let result;
+-    try {
+-      result = await request(
+-        account,
+-        "/api/user/login?turnstile=",
+-        loginOptions(mergeCookieStrings(account.session, siteStatus.cookies))
+-      );
+-    } catch (error) {
+-      if (error?.kind !== "waf") throw error;
+-      bootstrap ??= await bootstrapLoginPage(account, signal);
+-      result = await request(
+-        account,
+-        "/api/user/login?turnstile=",
+-        loginOptions(mergeCookieStrings(account.session, bootstrap.cookies, siteStatus.cookies))
+-      );
+-    }
+-    if (!result.data || typeof result.data !== "object") {
+-      throw new SiteError("unavailable", "站点登录响应缺少用户信息。");
+-    }
+-    return {
+-      user: result.data,
+-      status: siteStatus.data,
+-      account: withSiteIdentity({ ...account, session: result.cookies }, result.data)
+-    };
+-  }
+-
+-  async function selfResponse(account) {
+-    if (!account.userId || (!account.session && !account.accessToken)) {
+-      throw new SiteError("credentials", "读取账号信息需要站点会话或系统访问令牌加用户 ID。");
+-    }
+-    const result = await request(account, "/api/user/self", { operation: "account read" });
+-    assertSameUser(account, result.data);
+-    return result;
+-  }
+-
+-  async function self(account) {
+-    return (await selfResponse(account)).data;
+-  }
+-
+-  async function profile(account) {
+-    const result = await selfResponse(account);
+-    return {
+-      user: result.data,
+-      account: withSiteIdentity({ ...account, session: result.cookies }, result.data),
+-      profileVerified: true
+     };
+-  }
+-
+-  async function importSession(account, text) {
+-    // Session handoff is deliberately limited to the confirmed AnyRouter
+-    // origin. A legacy/custom siteURL must not turn clipboard text into an
+-    // arbitrary cookie import target.
+-    if (!Object.values(SITES).includes(new URL(account.siteURL).origin)) {
+-      throw new SiteError("credentials", "会话导入只支持已知的 AnyRouter 站点。");
+-    }
+-    const handoff = parseSessionHandoff(text, { allowedOrigins: Object.values(SITES) });
+-    if (account.userId && account.userId !== handoff.userId) {
+-      throw new SiteError("credentials", "导出的会话属于另一个账号。");
+-    }
+-    const candidate = { ...account, ...handoff, accessToken: "", password: "" };
+-    return profile(candidate);
+-  }
+-
+-  async function selectKey(account, selection = "") {
+-    const selected = String(selection).trim();
+-    if (selected && !/^\d+$/.test(selected)) {
+-      throw new SiteError("selection", "请指定一个现有 API key 的数字 ID。");
+-    }
+-    const result = await request(account, selected ? `/api/token/${selected}` : "/api/token/?p=0&size=100", {
+-      operation: "API key lookup"
+-    });
+-    const items = selected ? [result.data] : Array.isArray(result.data) ? result.data : result.data?.items;
+-    if (!Array.isArray(items)) {
+-      throw new SiteError("unavailable", "站点没有返回 API key 列表。");
++    async function requestRaw(path, options = {}) {
++      throwIfAborted(budget.signal);
++      const { body, anonymous = false, navigation = false, allowChallenge = true, operation = "账号请求" } = options;
++      if (typeof path !== "string" || !path.startsWith("/") || path.startsWith("//")) throw new SiteError("config", "站点路径无效。");
++      const url = trustedURL(account.siteURL + path).href;
++      if (body !== undefined) { await beforeMutation?.(); throwIfAborted(budget.signal); }
++      const attempts = body === undefined && allowChallenge ? 2 : 1;
++      for (let attempt = 0; attempt < attempts; attempt++) {
++        throwIfAborted(budget.signal);
++        const headers = browserHeaders();
++        headers.set("referer", account.siteURL + (navigation ? "/login" : "/"));
++        headers.set("cache-control", "no-store");
++        for (const [name, v] of Object.entries(safeSiteHeaders(account.siteHeaders ?? {}))) headers.set(name, v);
++        if (navigation) { headers.set("accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"); headers.set("sec-fetch-mode", "navigate"); headers.set("sec-fetch-dest", "document"); }
++        const cookies = cookieHeader(jar, url, now()); if (cookies) headers.set("cookie", cookies);
++        headers.set("new-api-user", anonymous ? "-1" : account.userId || "-1");
++        if (!anonymous && operation !== "每日签到" && account.accessToken) headers.set("authorization", account.accessToken);
++        if (body !== undefined) { headers.set("content-type", "application/json"); headers.set("origin", account.siteURL); }
++        if (operation === "每日签到") headers.set("x-requested-with", "XMLHttpRequest");
++        let response;
++        try {
++          response = await fetchImpl(url, { method: body === undefined ? "GET" : "POST", headers,
++            ...(body !== undefined ? { body: JSON.stringify(body) } : {}), redirect: "manual", signal: budget.signal });
++          applySetCookies(jar, response.headers, url, now()); // Cookie state survives a bad/truncated body.
++          const raw = await readBoundedText(response, 2 * 1024 * 1024, { signal: budget.signal, timeoutMs });
++          let data; try { data = JSON.parse(raw); } catch {}
++          const result = { response, raw, data, status: response.status, cookies: cookieHeader(jar, url, now()), sessionState: snapshot() };
++          const tengine = response.headers.get("x-tengine-error") ?? "";
++          if (body === undefined && attempt + 1 < attempts && !/http_ratelimit|http_security_level_rule/i.test(tengine) && isShieldChallenge(response, raw)) {
++            const solution = solveWafChallenge(raw);
++            if (solution) { applySetCookies(jar, new Headers({ "set-cookie": `${solution}; Path=/; Secure; Max-Age=3600` }), url, now()); continue; }
++          }
++          return result;
++        } catch (error) {
++          if (budget.signal.aborted) throw budget.signal.reason;
++          if (error instanceof SiteError) throw error;
++          throw new SiteError("unavailable", "站点请求失败或超时，请检查账号代理与网络。");
++        }
++      }
+     }
+-    const active = items.filter(item => {
+-      const expires = quotaNumber(item?.expired_time);
+-      const remaining = quotaNumber(item?.remain_quota);
+-      return item?.status === 1 && typeof item.key === "string" && item.key.trim() && !/[\s*]/.test(item.key) &&
+-        (expires === null || expires <= 0 || expires * 1000 > now()) &&
+-        (item.unlimited_quota === true || remaining === null || remaining > 0);
+-    });
+-    if (selected && active[0] && String(active[0].id) !== selected) {
+-      throw new SiteError("selection", "站点返回了不同的 API key ID。");
++    async function request(path, options = {}) {
++      const r = await requestRaw(path, options);
++      if (!r.response.ok || !isRecord(r.data) || r.data.success !== true || isShieldChallenge(r.response, r.raw)) {
++        throw siteFailure(r.response, r.data, r.raw, options.operation ?? "账号请求", current());
++      }
++      return { data: r.data.data, cookies: r.cookies, sessionState: r.sessionState, raw: r.raw, response: r.response };
+     }
+-    const truncated = !selected && Number(result.data?.total) > items.length;
+-    if (!active.length) {
+-      throw new SiteError("selection", "没有可用的 API key。请先在网站上创建或启用一个 key，再重新连接。");
++    async function self() {
++      if (!positiveId(account.userId) || !hasSession(current(), now()) && !account.accessToken) throw new SiteError("credentials", "读取账号信息需要本站会话或系统访问令牌及用户 ID。");
++      const r = await request("/api/user/self"); checkIdentity(r.data); return r.data;
+     }
+-    if (active.length !== 1 || truncated) {
+-      const ids = active.slice(0, 10).map(item => String(item.id)).filter(id => /^\d+$/.test(id)).join(", ");
+-      throw new SiteError("selection", `More than one key may be available. Select an existing key ID in advanced login settings${ids ? ` (IDs: ${ids})` : ""}.`);
++    async function profile() { const user = await self(); return { user, account: current(), profileVerified: true }; }
++    async function login() {
++      if (!account.username || !account.password) throw new SiteError("credentials", "需要 AnyRouter 站点用户名和密码。");
++      // Bootstrap the known WAF read-only. Both login and sign_in POSTs are single-shot.
++      let info;
++      try { info = await request("/api/status", { anonymous: true }); }
++      catch (error) {
++        if (error.kind !== "waf") throw error;
++        await requestRaw("/login", { anonymous: true, navigation: true });
++        info = await request("/api/status", { anonymous: true });
++      }
++      if (!isRecord(info.data) || typeof info.data.turnstile_check !== "boolean") throw new SiteError("unavailable", "站点没有返回明确的登录验证配置。");
++      if (info.data.turnstile_check) throw new SiteError("captcha", "AnyRouter 开启了 Turnstile，请在浏览器登录后导入本站会话。");
++      const r = await request("/api/user/login?turnstile=", { anonymous: true, body: { username: account.username, password: account.password }, operation: "密码登录" });
++      checkIdentity(r.data);
++      return { user: r.data, status: info.data, account: current() };
+     }
+-    return { key: active[0].key.trim(), keyId: String(active[0].id ?? "") };
+-  }
+-
+-  async function signIn(account, signal) {
+-    if (!account.session) {
+-      throw new SiteError("credentials", "AnyRouter 签到需要有效的站点会话 Cookie。");
++    async function selectKey(selection = "") {
++      const id = selection === "" ? "" : positiveId(selection);
++      if (selection !== "" && !id) throw new SiteError("selection", "模型 Key ID 必须是正整数。");
++      const r = await request(id ? `/api/token/${id}` : "/api/token/?p=0&size=100", { operation: "读取已有模型 Key" });
++      const items = id ? [r.data] : Array.isArray(r.data) ? r.data : r.data?.items;
++      if (!Array.isArray(items) || items.some(x => !isRecord(x))) throw new SiteError("selection", "站点没有返回有效的模型 Key 列表。");
++      const total = Array.isArray(r.data) ? undefined : r.data?.total;
++      if (!id && (total !== undefined ? !Number.isSafeInteger(total) || total < items.length || total > items.length : items.length >= 100)) throw new SiteError("selection", "模型 Key 列表可能不完整，请填写目标 Key ID 或直接填写模型 Key。");
++      const active = items.filter(x => {
++        const exp = quotaNumber(x.expired_time), remain = quotaNumber(x.remain_quota);
++        return x.status === 1 && positiveId(x.id) && (x.user_id === undefined || positiveId(x.user_id) === account.userId) &&
++          usableModelKey(x.key) && (exp === -1 || exp !== null && exp > now() / 1000) &&
++          (x.unlimited_quota === true || remain !== null && remain > 0);
++      });
++      if (id && (active.length !== 1 || String(active[0].id) !== id)) throw new SiteError("selection", "目标 Key 不可用或不属于当前账号。");
++      if (active.length !== 1) throw new SiteError("selection", active.length ? "存在多把有效 Key，请填写目标 Key ID 或直接填写模型 Key。" : "没有可用模型 Key；账号仍可用于余额与签到。");
++      const item = active[0];
++      // New API stores token.key without the prefix; inference expects sk-.
++      const rawKey = item.key.trim();
++      const key = rawKey.startsWith("sk-") ? rawKey : `sk-${rawKey}`;
++      return { key, keyId: String(item.id ?? "") };
+     }
+-    const result = await requestRaw({ ...account, accessToken: "" }, "/api/user/sign_in", {
+-      body: {},
+-      signal,
+-      operation: "daily sign-in",
+-      // A sign-in POST may already have been applied. Never replay it.
+-      retryChallenge: false
+-    });
+-    if (!result.response.ok || !result.data || typeof result.data !== "object") {
+-      const error = siteFailure(result.response, result.data, result.raw, "daily sign-in");
+-      // Keep rotated WAF/session cookies even when the POST was blocked, so a
+-      // later scheduled attempt starts with the freshest site state.
+-      error.cookies = result.cookies;
+-      throw error;
++    async function signIn() {
++      if (!hasSession(current(), now(), `${account.siteURL}/api/user/sign_in`)) throw new SiteError("credentials", "每日签到需要对签到路径有效的站点会话 Cookie。");
++      const r = await requestRaw("/api/user/sign_in", { body: {}, operation: "每日签到" });
++      if (!r.response.ok || !isRecord(r.data) || typeof r.data.success !== "boolean" || isShieldChallenge(r.response, r.raw)) throw siteFailure(r.response, r.data, r.raw, "每日签到", current());
++      return { success: r.data.success, message: redactedMessage(r.data.message ?? "", current()), data: r.data.data, cookies: r.cookies, sessionState: snapshot(), status: r.status };
+     }
+-    return {
+-      success: result.data.success === true,
+-      message: String(result.data.message ?? "").trim(),
+-      data: result.data.data,
+-      cookies: result.cookies,
+-      status: result.status
+-    };
++    return { requestRaw, request, login, self, profile, selectKey, signIn, snapshot, account: current,
++      safeToPersist: () => !identityMismatch, signal: budget.signal,
++      status: () => request("/api/status", { anonymous: true }), close: () => budget.close() };
+   }
+-
++  async function run(account, signal, call) { const op = openSession(account, { signal }); try { return await call(op); } finally { op.close(); } }
+   function checkinResult(result) {
+     const message = result.message || "";
+-    // An empty success message is AnyRouter's "nothing left to claim" answer;
+-    // it is not proof of a new reward (same rule as the reference plugin).
+-    const outcome = result.success
+-      ? (message ? (ALREADY_RE.test(message) ? "done" : "claimed") : "done")
+-      : (classifySiteMessage(message) || "failed");
+-    const lastCheckin = {
+-      outcome,
+-      message: message || (outcome === "done" ? "AnyRouter：今日已签到，没有新的可领取额度。" : "AnyRouter 未返回签到结果。")
+-    };
+-    const direct = quotaNumber(result.data?.reward ?? result.data?.credit);
+-    const textReward = /(?:获得|奖励|领取|received|awarded|earned)\s*[$＄]\s*(\d+(?:\.\d+)?)/i.exec(message);
+-    const reward = Number.isFinite(direct) && direct > 0 ? direct : textReward ? Number(textReward[1]) : NaN;
+-    if (Number.isFinite(reward) && reward > 0) lastCheckin.credit = reward;
++    const classified = classifySiteMessage(message, result.status);
++    const outcome = ["captcha", "ineligible", "inactive"].includes(classified) ? classified :
++      result.success ? !message || classified === "done" ? "done" : "claimed" : classified ?? "failed";
++    const lastCheckin = { outcome, message: message || (outcome === "done" ? "今日已签到，没有新的可领取额度。" : "站点未确认签到成功。") };
++    if (outcome === "claimed") {
++      const direct = quotaNumber(result.data?.reward ?? result.data?.credit);
++      const match = /(?:获得|奖励|领取|received|awarded|earned)\s*[$＄]\s*(\d+(?:\.\d+)?)/i.exec(message);
++      const reward = direct !== null && direct > 0 ? direct : match ? Number(match[1]) : NaN;
++      if (Number.isFinite(reward) && reward > 0) lastCheckin.credit = reward;
++    }
+     return { lastCheckinDay: beijingDay(now()), lastCheckin };
+   }
+-
+-  return {
+-    request,
+-    requestRaw,
+-    status,
+-    login,
+-    self,
+-    profile,
+-    importSession,
+-    selectKey,
+-    signIn,
+-    checkinResult
++  return { openSession, checkinResult,
++    request: (a, p, o = {}) => run(a, o.signal, op => op.request(p, o)),
++    requestRaw: (a, p, o = {}) => run(a, o.signal, op => op.requestRaw(p, o)),
++    status: (a, signal) => run(a, signal, op => op.status()), login: (a, signal) => run(a, signal, op => op.login()),
++    self: (a, signal) => run(a, signal, op => op.self()), profile: (a, signal) => run(a, signal, op => op.profile()),
++    selectKey: (a, selection, signal) => run(a, signal, op => op.selectKey(selection)), signIn: (a, signal) => run(a, signal, op => op.signIn()),
++    importSession: (a, value, signal) => { const handoff = parseSessionHandoff(value); if (a.userId && a.userId !== handoff.userId) throw new SiteError("identity", "导入会话属于另一个账号。"); return run({ ...a, ...handoff, accessToken: "", password: "" }, signal, op => op.profile()); },
+   };
+ }
+-
+ export const _internal = { classifySiteMessage, isShieldChallenge, retryAfterMs, siteFailure, solveWafChallenge };
+diff --git a/.trellis/tasks/11-23-harden-anyrouter/baseline/lib/usage.mjs b/lib/usage.mjs
+index 87d4f21..45c998e 100644
+--- a/.trellis/tasks/11-23-harden-anyrouter/baseline/lib/usage.mjs
++++ b/lib/usage.mjs
+@@ -1,187 +1,123 @@
+-import { quotaNumber } from "./site-client.mjs";
++import { quotaNumber, readBoundedText } from "./site-client.mjs";
++import { deadlineSignal, isRecord, redactedMessage, throwIfAborted, trustedURL } from "./safety.mjs";
+ 
+-// AnyRouter counts 1/500000 dollar per quota unit unless /api/status says
+-// otherwise. Format with BigInt so a single quota keeps its exact precision.
+-export function formatUSD(quota) {
+-  const amount = BigInt(quota);
+-  const negative = amount < 0n;
+-  const absolute = negative ? -amount : amount;
+-  const whole = absolute / 500000n;
+-  const fraction = ((absolute % 500000n) * 2n).toString().padStart(6, "0");
+-  const decimals = fraction.replace(/0+$/, "").padEnd(2, "0");
+-  return `${negative ? "-" : ""}$${whole}.${decimals}`;
++export function quotaRate(value = 500000) {
++  const rate = typeof value === "string" && /^\d+$/.test(value) ? Number(value) : value;
++  if (!Number.isSafeInteger(rate) || rate <= 0) throw new Error("quotaPerUnit 必须是正的安全整数");
++  return rate;
++}
++export function formatUSD(quota, quotaPerUnit = 500000) {
++  if (typeof quota !== "bigint" && !Number.isSafeInteger(quota)) throw new Error("额度必须是安全整数");
++  const rate = BigInt(quotaRate(quotaPerUnit)), n = BigInt(quota), abs = n < 0n ? -n : n;
++  let remainder = abs % rate, fraction = "";
++  // Exact for standard site quota rates. Unusual rates use an 18-place
++  // truncated expansion: safe-integer rates cannot hide a whole quota as zero.
++  for (let i = 0; remainder && i < 18; i++) { remainder *= 10n; fraction += String(remainder / rate); remainder %= rate; }
++  fraction = fraction.replace(/0+$/, "").padEnd(2, "0");
++  return `${n < 0n ? "-" : ""}$${abs / rate}.${fraction}`;
+ }
+-
+ export function beijingDayRange(now = Date.now()) {
+-  const endTimestamp = Math.floor(now / 1000);
+-  const offset = 8 * 60 * 60;
++  const endTimestamp = Math.floor(now / 1000), offset = 8 * 3600;
+   const startTimestamp = Math.floor((endTimestamp + offset) / 86400) * 86400 - offset;
+-  const date = new Date((startTimestamp + offset) * 1000).toISOString().slice(0, 10);
+-  return { startTimestamp, endTimestamp, date };
++  return { startTimestamp, endTimestamp, date: new Date((startTimestamp + offset) * 1000).toISOString().slice(0,10) };
+ }
+-
+-const LOG_PAGE_SIZE = 100;
+-const MAX_LOG_PAGES = 20;
+-
++const LOG_PAGE_SIZE = 100, MAX_LOG_PAGES = 20;
++const bound = site => typeof site.snapshot === "function";
++const request = (site, account, path, signal) => bound(site) ? site.request(path) : site.request(account, path, { signal });
+ function dailyQuota(data) {
+-  if (!data || typeof data !== "object" || Array.isArray(data) || data.success !== true) {
+-    throw new Error("今日消费统计没有返回明确的成功状态");
+-  }
+-  const quota = quotaNumber(data.data?.quota);
+-  if (quota === null || quota < 0 || !Number.isSafeInteger(quota)) {
+-    throw new Error("今日消费统计缺少有效的 quota，不能显示估算值");
+-  }
+-  return quota;
++  const n = quotaNumber(data?.data?.quota);
++  if (data?.success !== true || n === null || !Number.isSafeInteger(n)) throw new Error("消费统计缺少有效 quota，不显示估算值");
++  return n;
+ }
+-
+-async function sumTodayFromLogs(site, account, range) {
+-  let total = 0n;
+-  let seen = 0;
+-  let expected = null;
++async function sumTodayFromLogs(site, account, range, signal) {
++  let total = 0n, seen = 0, expected;
++  const ids = new Set(), pages = new Set();
+   for (let page = 1; page <= MAX_LOG_PAGES; page++) {
+-    const result = await site.request(account,
+-      `/api/log/self?p=${page}&page_size=${LOG_PAGE_SIZE}&type=2&start_timestamp=${range.startTimestamp}&end_timestamp=${range.endTimestamp}`,
+-      { operation: "consume log page" });
++    throwIfAborted(signal);
++    const result = await request(site, account, `/api/log/self?p=${page}&page_size=${LOG_PAGE_SIZE}&type=2&start_timestamp=${range.startTimestamp}&end_timestamp=${range.endTimestamp}`, signal);
+     const data = result?.data;
+-    if (!data || typeof data !== "object" || Array.isArray(data) || !Array.isArray(data.items) ||
+-        !Number.isSafeInteger(data.total) || data.total < 0) {
+-      throw new Error("消费日志分页格式无效，无法汇总今日消耗");
+-    }
+-    if (expected === null) expected = data.total;
+-    else if (data.total !== expected) throw new Error("消费日志分页总数变化，无法汇总今日消耗");
+-    if (data.items.length === 0 && seen < expected) throw new Error("消费日志分页提前结束，无法汇总今日消耗");
++    if (!isRecord(data) || !Array.isArray(data.items) || !Number.isSafeInteger(data.total) || data.total < 0 || data.items.length > LOG_PAGE_SIZE ||
++        data.page !== undefined && data.page !== page || data.page_size !== undefined && data.page_size !== LOG_PAGE_SIZE) throw new Error("消费日志分页格式无效");
++    if (expected === undefined) expected = data.total;
++    if (expected !== data.total) throw new Error("消费日志分页总数变化");
++    if (!data.items.length && seen < expected) throw new Error("消费日志分页提前结束");
++    const signature = JSON.stringify(data.items);
++    if (data.items.length && pages.has(signature)) throw new Error("消费日志分页重复，无法完整汇总");
++    pages.add(signature);
+     for (const item of data.items) {
+-      if (!item || typeof item !== "object" || Array.isArray(item)) {
+-        throw new Error("消费日志条目格式无效，无法汇总今日消耗");
++      if (!isRecord(item)) throw new Error("消费日志条目格式无效");
++      if (item.id !== undefined) {
++        if (!Number.isSafeInteger(item.id) || item.id < 1 || ids.has(item.id)) throw new Error("消费日志 ID 无效或重复");
++        ids.add(item.id);
+       }
+       if (item.type !== undefined && item.type !== 2) continue;
+-      const quota = quotaNumber(item.quota);
+-      if (quota === null || !Number.isSafeInteger(quota)) {
+-        throw new Error("消费日志条目缺少有效 quota，无法汇总今日消耗");
+-      }
+-      if (item.created_at !== undefined &&
+-          (!Number.isSafeInteger(item.created_at) ||
+-           item.created_at < range.startTimestamp || item.created_at > range.endTimestamp)) {
+-        throw new Error("消费日志时间超出今日范围，无法汇总今日消耗");
+-      }
+-      total += BigInt(quota);
++      const n = quotaNumber(item.quota);
++      if (n === null || !Number.isSafeInteger(n)) throw new Error("消费日志条目缺少有效 quota");
++      if (item.created_at !== undefined && (!Number.isSafeInteger(item.created_at) || item.created_at < range.startTimestamp || item.created_at > range.endTimestamp)) throw new Error("消费日志时间超出今日范围");
++      if (item.user_id !== undefined && String(item.user_id) !== account.userId) throw new Error("消费日志用户与账号不一致");
++      total += BigInt(n);
+     }
+     seen += data.items.length;
+     if (seen >= expected) break;
+-    if (page === MAX_LOG_PAGES) {
+-      throw new Error(`今日消费日志超过 ${MAX_LOG_PAGES * LOG_PAGE_SIZE} 条，无法完整汇总`);
+-    }
+-  }
+-  if (seen !== expected || total > BigInt(Number.MAX_SAFE_INTEGER)) {
+-    throw new Error("今日消费日志未完整汇总，不显示估算值");
++    if (page === MAX_LOG_PAGES) throw new Error("今日消费日志超过 2000 条，无法完整汇总");
+   }
++  if (seen !== expected || total > BigInt(Number.MAX_SAFE_INTEGER) || total < BigInt(Number.MIN_SAFE_INTEGER)) throw new Error("今日消费日志未完整汇总，不显示估算值");
+   return Number(total);
+ }
+-
+-// readTodaySpend tries the stat endpoint first, then falls back to paginated
+-// consume logs. The stat path is blocked by a path-specific WAF rule on the real
+-// site; that must not affect the balance or check-in.
+-export async function readTodaySpend(site, account, now = Date.now) {
++export async function readTodaySpend(site, account, now = Date.now, signal) {
+   const range = beijingDayRange(now());
+   try {
+-    const result = await site.request(account,
+-      `/api/log/self/stat?type=2&start_timestamp=${range.startTimestamp}&end_timestamp=${range.endTimestamp}`,
+-      { operation: "today spend" });
+-    return { ...range, quota: dailyQuota({ success: true, data: result.data }) };
++    throwIfAborted(signal);
++    const result = await request(site, account, `/api/log/self/stat?type=2&start_timestamp=${range.startTimestamp}&end_timestamp=${range.endTimestamp}`, signal);
++    return { ...range, quota: dailyQuota({success:true,data:result.data}), source: "stat" };
+   } catch (error) {
+-    if (error?.kind === "credentials") {
+-      return { ...range, error: "登录已失效，请重新导入 Cookie", kind: "expired" };
+-    }
+-    try {
+-      return { ...range, quota: await sumTodayFromLogs(site, account, range), source: "logs" };
+-    } catch (fallbackError) {
+-      const reason = fallbackError instanceof Error ? fallbackError.message : "消费日志汇总失败";
+-      return {
+-        ...range,
+-        error: `${reason}（仅影响今日消耗；余额与签到不受影响，可稍后重试）`,
+-        kind: error?.kind === "waf" ? "kept" : "kept",
+-      };
++    throwIfAborted(signal);
++    if (error?.kind === "credentials" || error?.kind === "identity") return { ...range, error: "本站会话失效或账号不匹配，请更新会话；模型 Key 状态不受影响", kind: "console-expired" };
++    try { return { ...range, quota: await sumTodayFromLogs(site, account, range, signal), source: "logs" }; }
++    catch (fallback) {
++      throwIfAborted(signal);
++      return { ...range, error: `${redactedMessage(fallback?.message ?? "消费日志汇总失败", account)}（仅影响今日消耗；余额与签到不受影响，可稍后重试）`, kind: "kept" };
+     }
+   }
+ }
+-
+-function userBalance(user, quotaPerUnit) {
+-  const quota = quotaNumber(user?.quota);
+-  const used = quotaNumber(user?.used_quota);
+-  if (quota === null || used === null || !Number.isSafeInteger(quota) || !Number.isSafeInteger(used)) {
+-    throw new Error("余额接口缺少有效的 quota/used_quota，不能显示估算值");
+-  }
+-  return { quota, used, total: quota + used };
++function userBalance(user) {
++  const quota = quotaNumber(user?.quota), used = quotaNumber(user?.used_quota);
++  if (!Number.isSafeInteger(quota) || !Number.isSafeInteger(used)) throw new Error("余额接口缺少有效的 quota/used_quota，不显示估算值");
++  return { quota, used };
+ }
+-
+-// Optional key-only fallback: /v1/dashboard/billing/usage reports cents of
+-// cumulative spend and never a remaining balance.
+-async function keySpend(apiBase, key, fetchImpl = globalThis.fetch) {
++async function keySpend(apiBase, key, fetchImpl = globalThis.fetch, signal) {
+   if (!key) return null;
++  const budget = deadlineSignal(signal);
+   try {
+-    const base = String(apiBase || "https://anyrouter.top/v1").replace(/\/+$/, "");
+-    const response = await fetchImpl(`${base}/dashboard/billing/usage`, {
+-      headers: { Authorization: `Bearer ${key}`, Accept: "application/json" },
+-      signal: AbortSignal.timeout(30_000),
+-    });
+-    if (!response.ok) return null;
+-    const json = await response.json();
+-    const value = json?.data?.total_usage ?? json?.total_usage;
+-    if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return null;
+-    return value / 100;
+-  } catch {
+-    return null;
+-  }
++    const url = trustedURL(`${(apiBase || "https://anyrouter.top/v1").replace(/\/+$/, "")}/dashboard/billing/usage`, { model: true });
++    const response = await fetchImpl(url.href, { headers: { Authorization:`Bearer ${key}`, Accept:"application/json" }, redirect:"manual", signal:budget.signal });
++    throwIfAborted(budget.signal);
++    if (!response.ok) { void response.body?.cancel().catch(()=>{}); return null; }
++    const data = JSON.parse(await readBoundedText(response, 65536, {signal:budget.signal}));
++    const value = data?.data?.total_usage ?? data?.total_usage;
++    return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value / 100 : null;
++  } catch (error) { throwIfAborted(budget.signal); return null; }
++  finally {budget.close();}
+ }
+-
+-export async function readUsage(site, account, { quotaPerUnit = 500000, now = Date.now, fetchImpl = globalThis.fetch } = {}) {
++export async function readUsage(site, account, { quotaPerUnit = 500000, now = Date.now, fetchImpl = globalThis.fetch, signal = site?.signal } = {}) {
++  const rate = quotaRate(quotaPerUnit);
+   if (account.mode === "api-key") {
+-    const spent = await keySpend(account.apiBase, account.key, fetchImpl);
+-    if (spent === null) return { plan: "API Key（仅推理）", windows: [], signIn: "kept" };
+-    return {
+-      plan: "API Key（仅推理）",
+-      windows: [{ name: "累计消耗", display: `$${spent.toFixed(2)}`, aside: true }],
+-      signIn: "kept",
+-    };
++    const spent = await keySpend(account.apiBase, account.key, fetchImpl, signal);
++    return { plan: "API Key（仅推理）", windows: spent === null ? [] : [{ name:"累计消耗", display:`$${spent.toFixed(2)}`, aside:true }], signIn:"kept", ...(spent===null?{error:"仅有模型 Key，无法确认余额；累计消耗读取不可用"}:{}) };
+   }
+-
+   let user;
+-  try {
+-    user = await site.self(account);
+-  } catch (error) {
+-    return {
+-      error: error?.kind === "credentials"
+-        ? "AnyRouter：站点拒绝了登录凭据，请重新导入 Cookie 或账号密码。"
+-        : `AnyRouter：无法读取账号信息（${error?.message || "站点未返回有效响应"}）`,
+-      windows: [],
+-      signIn: error?.kind === "credentials" ? "expired" : "kept",
+-    };
++  try { throwIfAborted(signal); user = bound(site) ? await site.self() : await site.self(account, signal); }
++  catch (error) {
++    throwIfAborted(signal);
++    return { error:error?.kind === "credentials" ? "AnyRouter：本站会话已失效，请重新导入 Cookie；模型 API Key 未被判定失效。" : `AnyRouter：${redactedMessage(error?.message || "无法读取账号信息", account)}`, windows:[], signIn:"kept" };
+   }
+-
+   let balance;
+-  try {
+-    balance = userBalance(user, quotaPerUnit);
+-  } catch (error) {
+-    return { error: `AnyRouter：${error.message}`, windows: [], signIn: "kept" };
+-  }
+-
+-  const today = await readTodaySpend(site, account, now);
+-  const daily = today.error ? `不可用：${today.error}` : `${formatUSD(today.quota)}${today.source === "logs" ? "（消费日志汇总）" : ""}`;
+-  return {
+-    plan: typeof user.username === "string" && user.username ? user.username : undefined,
+-    balance: formatUSD(balance.quota),
+-    signIn: today.kind === "expired" ? "expired" : "kept",
+-    windows: [
+-      { name: "累计消耗", display: formatUSD(balance.used), aside: true },
+-      {
+-        name: "余额",
+-        balance: balance.quota / quotaPerUnit,
+-        unit: "USD",
+-        display: formatUSD(balance.quota),
+-      },
+-      { name: "今日消耗", display: `${daily}（${today.date}，北京时间）`, aside: true },
+-    ],
+-  };
++  try { balance=userBalance(user); } catch (error) { return {error:error.message, windows:[], signIn:"kept"}; }
++  const today = await readTodaySpend(site, account, now, signal);
++  const daily = today.error ? `不可用：${today.error}` : `${formatUSD(today.quota,rate)}${today.source==="logs"?"（消费日志汇总）":""}`;
++  return { plan:typeof user.username === "string"?user.username:undefined, balance:formatUSD(balance.quota,rate), signIn:"kept",
++    windows:[{name:"累计消耗",display:formatUSD(balance.used,rate),aside:true},
++      {name:"余额",balance:balance.quota/rate,unit:"USD",display:formatUSD(balance.quota,rate)},
++      {name:"今日消耗",display:`${daily}（${today.date}，北京时间）`,aside:true}] };
+ }
+-
+-export const _internal = { dailyQuota, sumTodayFromLogs, keySpend, userBalance };
++export const _internal = {dailyQuota, sumTodayFromLogs, keySpend, userBalance};

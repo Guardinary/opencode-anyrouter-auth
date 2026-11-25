@@ -1,0 +1,14 @@
+✔ installed host RPC: login prompts, jar persistence, rotation/check-in, missing-key guard and one fetch per request (341.2108ms)
+ℹ Isolated host RPC: six prompts, one UID account, persisted rotation, one check-in POST and one upstream inference fetch verified.
+✔ installed host RPC: authoritative account models, config/runtime SDKs, fallback/empty lists and independent switches (317.1822ms)
+ℹ Real host normalization: declared/undeclared SDKs and capabilities, aliases, disabled/manual IDs, successful empty lists, WAF fallback and four switch combinations verified.
+✔ isolated real Magpie CLI: verified Bun fence, plugin add/list, native-key login and offline quota (3950.8641ms)
+ℹ Actual CLI verified with 5 fenced host launches; all plugin HTTP traffic was handled by the loopback fixture.
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 4729.2122

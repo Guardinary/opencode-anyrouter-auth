@@ -1,0 +1,7 @@
+{
+  "baselineExit": 0,
+  "mutationExit": 1,
+  "guardMutationCaught": true,
+  "workingSourceUnchanged": true,
+  "fixtureDependencies": "copied installed closure, no install"
+}

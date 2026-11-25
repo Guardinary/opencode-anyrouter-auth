@@ -1,0 +1,91 @@
+{
+  "name": "opencode-anyrouter-auth",
+  "version": "0.2.1",
+  "filename": "D:\\Repo\\opencode-anyrouter-auth\\dist\\opencode-anyrouter-auth-0.2.1.tgz",
+  "files": [
+    {
+      "path": "CHANGELOG.md"
+    },
+    {
+      "path": "content-filter.example.json"
+    },
+    {
+      "path": "DESIGN.md"
+    },
+    {
+      "path": "icon.png"
+    },
+    {
+      "path": "index.mjs"
+    },
+    {
+      "path": "lib/account-operations.mjs"
+    },
+    {
+      "path": "lib/accounts.mjs"
+    },
+    {
+      "path": "lib/body-inspection.mjs"
+    },
+    {
+      "path": "lib/catalog.mjs"
+    },
+    {
+      "path": "lib/content-filter.mjs"
+    },
+    {
+      "path": "lib/cookies.mjs"
+    },
+    {
+      "path": "lib/declared-models.mjs"
+    },
+    {
+      "path": "lib/headers.mjs"
+    },
+    {
+      "path": "lib/model-metadata.mjs"
+    },
+    {
+      "path": "lib/model-registry.mjs"
+    },
+    {
+      "path": "lib/protocols.mjs"
+    },
+    {
+      "path": "lib/provider.mjs"
+    },
+    {
+      "path": "lib/request.mjs"
+    },
+    {
+      "path": "lib/response.mjs"
+    },
+    {
+      "path": "lib/safety.mjs"
+    },
+    {
+      "path": "lib/session-repair.mjs"
+    },
+    {
+      "path": "lib/site-client.mjs"
+    },
+    {
+      "path": "lib/usage.mjs"
+    },
+    {
+      "path": "LICENSE"
+    },
+    {
+      "path": "package.json"
+    },
+    {
+      "path": "README.md"
+    },
+    {
+      "path": "SECURITY.md"
+    },
+    {
+      "path": "UPSTREAM.md"
+    }
+  ]
+}

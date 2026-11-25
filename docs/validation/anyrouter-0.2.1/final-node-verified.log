@@ -1,0 +1,2688 @@
+$ node scripts/test.mjs "--" "--test-reporter=tap"
+TAP version 13
+# Subtest: serialized usage/check-in operations use the latest persisted rotation
+ok 1 - serialized usage/check-in operations use the latest persisted rotation
+  ---
+  duration_ms: 54.982
+  type: 'test'
+  ...
+# Subtest: same-uid-login during preflight prevents the POST and stale cookie write
+ok 2 - same-uid-login during preflight prevents the POST and stale cookie write
+  ---
+  duration_ms: 4.9387
+  type: 'test'
+  ...
+# Subtest: logout during preflight prevents the POST and stale cookie write
+ok 3 - logout during preflight prevents the POST and stale cookie write
+  ---
+  duration_ms: 3.6449
+  type: 'test'
+  ...
+# Subtest: a new same-UID login after the POST retains confirmed success without reverting credentials
+ok 4 - a new same-UID login after the POST retains confirmed success without reverting credentials
+  ---
+  duration_ms: 4.0856
+  type: 'test'
+  ...
+# Subtest: patching session state preserves the latest host fields and unknown refresh fields
+ok 5 - patching session state preserves the latest host fields and unknown refresh fields
+  ---
+  duration_ms: 4.5638
+  type: 'test'
+  ...
+# Subtest: confirmed check-in with a failed save makes one write attempt and never resubmits
+ok 6 - confirmed check-in with a failed save makes one write attempt and never resubmits
+  ---
+  duration_ms: 5.3901
+  type: 'test'
+  ...
+# Subtest: usage with a failed save preserves the result and attempts storage once
+ok 7 - usage with a failed save preserves the result and attempts storage once
+  ---
+  duration_ms: 3.517
+  type: 'test'
+  ...
+# Subtest: queued cancellation does not abort the current account operation or submit later
+ok 8 - queued cancellation does not abort the current account operation or submit later
+  ---
+  duration_ms: 4.9295
+  type: 'test'
+  ...
+# Subtest: pre-aborted account hooks and login authorization perform no network calls
+ok 9 - pre-aborted account hooks and login authorization perform no network calls
+  ---
+  duration_ms: 1.1933
+  type: 'test'
+  ...
+# Subtest: a deleted session during preflight is persisted but is not used for a POST
+ok 10 - a deleted session during preflight is persisted but is not used for a POST
+  ---
+  duration_ms: 3.9302
+  type: 'test'
+  ...
+# Subtest: a session scoped to self cannot authorize the different sign-in path
+ok 11 - a session scoped to self cannot authorize the different sign-in path
+  ---
+  duration_ms: 2.2937
+  type: 'test'
+  ...
+# Subtest: cross-midnight preflight stores the confirmation day, not the queued start day
+ok 12 - cross-midnight preflight stores the confirmation day, not the queued start day
+  ---
+  duration_ms: 3.2409
+  type: 'test'
+  ...
+# Subtest: the injected clock governs persisted cookie expiry throughout the account codec
+ok 13 - the injected clock governs persisted cookie expiry throughout the account codec
+  ---
+  duration_ms: 2.8149
+  type: 'test'
+  ...
+# Subtest: passwords are persisted only with explicit password-mode check-in consent
+ok 14 - passwords are persisted only with explicit password-mode check-in consent
+  ---
+  duration_ms: 30.8479
+  type: 'test'
+  ...
+# Subtest: site accounts may omit a model key; the placeholder is never a real key
+ok 15 - site accounts may omit a model key; the placeholder is never a real key
+  ---
+  duration_ms: 3.4064
+  type: 'test'
+  ...
+# Subtest: API-key-only credentials require a real key and cannot acquire site capabilities
+ok 16 - API-key-only credentials require a real key and cannot acquire site capabilities
+  ---
+  duration_ms: 1.3874
+  type: 'test'
+  ...
+# Subtest: legacy API and mixed credentials migrate without opting into check-in
+ok 17 - legacy API and mixed credentials migrate without opting into check-in
+  ---
+  duration_ms: 0.6904
+  type: 'test'
+  ...
+# Subtest: corrupt versioned credentials and unsafe endpoint formats fail visibly
+ok 18 - corrupt versioned credentials and unsafe endpoint formats fail visibly
+  ---
+  duration_ms: 0.5642
+  type: 'test'
+  ...
+# Subtest: protocol base paths stay on anyrouter.top and do not accumulate versions
+ok 19 - protocol base paths stay on anyrouter.top and do not accumulate versions
+  ---
+  duration_ms: 0.1936
+  type: 'test'
+  ...
+# Subtest: UID validation prevents cross-account session replacement
+ok 20 - UID validation prevents cross-account session replacement
+  ---
+  duration_ms: 0.3569
+  type: 'test'
+  ...
+# Subtest: account names prefer real email, then site username or UID, never the display remark
+ok 21 - account names prefer real email, then site username or UID, never the display remark
+  ---
+  duration_ms: 1.3417
+  type: 'test'
+  ...
+# Subtest: shared remarks do not create equal account names or collapse distinct UIDs
+ok 22 - shared remarks do not create equal account names or collapse distinct UIDs
+  ---
+  duration_ms: 0.7315
+  type: 'test'
+  ...
+# Subtest: session refresh preserves both corrected and legacy native names until an explicit host migration
+ok 23 - session refresh preserves both corrected and legacy native names until an explicit host migration
+  ---
+  duration_ms: 1.2459
+  type: 'test'
+  ...
+# Subtest: legacy API metadata remarks are not emails and refresh preserves their native name
+ok 24 - legacy API metadata remarks are not emails and refresh preserves their native name
+  ---
+  duration_ms: 0.6687
+  type: 'test'
+  ...
+# Subtest: site identity enrichment verifies UID and never promotes a remark into an email
+ok 25 - site identity enrichment verifies UID and never promotes a remark into an email
+  ---
+  duration_ms: 0.2942
+  type: 'test'
+  ...
+# Subtest: account capabilities separate inference, usage and check-in
+ok 26 - account capabilities separate inference, usage and check-in
+  ---
+  duration_ms: 0.7644
+  type: 'test'
+  ...
+# Subtest: Beijing-day boundaries are independent of the runtime timezone
+ok 27 - Beijing-day boundaries are independent of the runtime timezone
+  ---
+  duration_ms: 0.1464
+  type: 'test'
+  ...
+# Subtest: bounded inspection reads Request and Response without consuming the original
+ok 28 - bounded inspection reads Request and Response without consuming the original
+  ---
+  duration_ms: 28.9285
+  type: 'test'
+  ...
+# Subtest: byte limits do not trust Content-Length or count UTF-16 characters
+ok 29 - byte limits do not trust Content-Length or count UTF-16 characters
+  ---
+  duration_ms: 2.4754
+  type: 'test'
+  ...
+# Subtest: split UTF-8 is decoded at completion and the original bytes remain intact
+ok 30 - split UTF-8 is decoded at completion and the original bytes remain intact
+  ---
+  duration_ms: 4.9826
+  type: 'test'
+  ...
+# Subtest: malformed or truncated UTF-8 abandons inspection, not the original body
+ok 31 - malformed or truncated UTF-8 abandons inspection, not the original body
+  ---
+  duration_ms: 1.3553
+  type: 'test'
+  ...
+# Subtest: a quiet clone times out without awaiting its original tee consumer
+ok 32 - a quiet clone times out without awaiting its original tee consumer
+  ---
+  duration_ms: 2.4959
+  type: 'test'
+  ...
+# Subtest: abort during a pending read preserves the original and abort reason
+ok 33 - abort during a pending read preserves the original and abort reason
+  ---
+  duration_ms: 0.9854
+  type: 'test'
+  ...
+# Subtest: an already-aborted inspection does not consume its source
+ok 34 - an already-aborted inspection does not consume its source
+  ---
+  duration_ms: 0.4013
+  type: 'test'
+  ...
+# Subtest: a read failure remains observable when the caller reads the original
+ok 35 - a read failure remains observable when the caller reads the original
+  ---
+  duration_ms: 1.3027
+  type: 'test'
+  ...
+# Subtest: empty, unavailable and consumed bodies have explicit inconclusive results
+ok 36 - empty, unavailable and consumed bodies have explicit inconclusive results
+  ---
+  duration_ms: 0.5533
+  type: 'test'
+  ...
+# Subtest: invalid inspection bounds cannot accidentally enable an unbounded read
+ok 37 - invalid inspection bounds cannot accidentally enable an unbounded read
+  ---
+  duration_ms: 0.6081
+  type: 'test'
+  ...
+# Subtest: declared model catalog contains the 16 public AnyRouter models with protocol-specific SDKs
+ok 38 - declared model catalog contains the 16 public AnyRouter models with protocol-specific SDKs
+  ---
+  duration_ms: 2.0618
+  type: 'test'
+  ...
+# Subtest: protocol mapping sends Claude to Anthropic Messages and GPT/Gemini to Responses
+ok 39 - protocol mapping sends Claude to Anthropic Messages and GPT/Gemini to Responses
+  ---
+  duration_ms: 0.2665
+  type: 'test'
+  ...
+# Subtest: buildCatalog applies declared models, protocol SDKs and the single AnyRouter API base
+ok 40 - buildCatalog applies declared models, protocol SDKs and the single AnyRouter API base
+  ---
+  duration_ms: 23.8227
+  type: 'test'
+  ...
+# Subtest: explicit model overrides keep aliases, SDK, official base URL, headers and limits
+ok 41 - explicit model overrides keep aliases, SDK, official base URL, headers and limits
+  ---
+  duration_ms: 0.484
+  type: 'test'
+  ...
+# Subtest: public pricing metadata never grants a model the account did not discover
+ok 42 - public pricing metadata never grants a model the account did not discover
+  ---
+  duration_ms: 0.3175
+  type: 'test'
+  ...
+# Subtest: site-only accounts receive no inference catalog and make no network call
+ok 43 - site-only accounts receive no inference catalog and make no network call
+  ---
+  duration_ms: 0.4774
+  type: 'test'
+  ...
+# Subtest: discovery uses the account model key and never adds registry-only models
+ok 44 - discovery uses the account model key and never adds registry-only models
+  ---
+  duration_ms: 6.2288
+  type: 'test'
+  ...
+# Subtest: discovery failure falls back to the provider-declared models with a visible marker
+ok 45 - discovery failure falls back to the provider-declared models with a visible marker
+  ---
+  duration_ms: 2.1373
+  type: 'test'
+  ...
+# Subtest: session check-in preflights /api/user/self and posts /api/user/sign_in exactly once
+ok 46 - session check-in preflights /api/user/self and posts /api/user/sign_in exactly once
+  ---
+  duration_ms: 67.2361
+  type: 'test'
+  ...
+# Subtest: password check-in renews a refused session before the single sign_in POST
+ok 47 - password check-in renews a refused session before the single sign_in POST
+  ---
+  duration_ms: 12.5121
+  type: 'test'
+  ...
+# Subtest: empty successful sign-in message is done, not claimed
+ok 48 - empty successful sign-in message is done, not claimed
+  ---
+  duration_ms: 5.9566
+  type: 'test'
+  ...
+# Subtest: already-signed-in responses map to done without a reward
+ok 49 - already-signed-in responses map to done without a reward
+  ---
+  duration_ms: 5.869
+  type: 'test'
+  ...
+# Subtest: captcha responses are observable but do not mark an unconfirmed day complete
+ok 50 - captcha responses are observable but do not mark an unconfirmed day complete
+  ---
+  duration_ms: 3.8612
+  type: 'test'
+  ...
+# Subtest: 401 sign-in is ineligible and still saves rotated site cookies
+ok 51 - 401 sign-in is ineligible and still saves rotated site cookies
+  ---
+  duration_ms: 5.3334
+  type: 'test'
+  ...
+# Subtest: 404 and 405 sign-in responses are inactive without a confirmed completion day
+    # Subtest: 404
+    ok 1 - 404
+      ---
+      duration_ms: 5.0282
+      type: 'test'
+      ...
+    # Subtest: 405
+    ok 2 - 405
+      ---
+      duration_ms: 3.452
+      type: 'test'
+      ...
+    1..2
+ok 52 - 404 and 405 sign-in responses are inactive without a confirmed completion day
+  ---
+  duration_ms: 9.1774
+  type: 'test'
+  ...
+# Subtest: 429 and 5xx sign-in failures are failed and never persist lastCheckinDay
+    # Subtest: 429
+    ok 1 - 429
+      ---
+      duration_ms: 5.717
+      type: 'test'
+      ...
+    # Subtest: 503
+    ok 2 - 503
+      ---
+      duration_ms: 5.8045
+      type: 'test'
+      ...
+    1..2
+ok 53 - 429 and 5xx sign-in failures are failed and never persist lastCheckinDay
+  ---
+  duration_ms: 12.2262
+  type: 'test'
+  ...
+# Subtest: a WAF challenge on the sign_in POST is captcha and is never replayed
+ok 54 - a WAF challenge on the sign_in POST is captcha and is never replayed
+  ---
+  duration_ms: 4.12
+  type: 'test'
+  ...
+# Subtest: concurrent same-account check-ins queue to one preflight and one sign_in POST
+ok 55 - concurrent same-account check-ins queue to one preflight and one sign_in POST
+  ---
+  duration_ms: 13.9
+  type: 'test'
+  ...
+# Subtest: wrong UID during preflight fails closed without replacing credentials
+ok 56 - wrong UID during preflight fails closed without replacing credentials
+  ---
+  duration_ms: 2.0478
+  type: 'test'
+  ...
+# Subtest: api-key-only accounts cannot check in and make no site request
+ok 57 - api-key-only accounts cannot check in and make no site request
+  ---
+  duration_ms: 1.4832
+  type: 'test'
+  ...
+# Subtest: empty rules are disabled and invalid rules never echo their contents
+ok 58 - empty rules are disabled and invalid rules never echo their contents
+  ---
+  duration_ms: 2.368
+  type: 'test'
+  ...
+# Subtest: literal matching is longest-first, case-sensitive, Unicode-safe and non-cascading
+ok 59 - literal matching is longest-first, case-sensitive, Unicode-safe and non-cascading
+  ---
+  duration_ms: 2.3015
+  type: 'test'
+  ...
+# Subtest: Markdown code spans, longer fences, tilde fences and unclosed fences stay intact
+ok 60 - Markdown code spans, longer fences, tilde fences and unclosed fences stay intact
+  ---
+  duration_ms: 1.0223
+  type: 'test'
+  ...
+# Subtest: ambiguous indented or container-nested code conservatively preserves its text field
+ok 61 - ambiguous indented or container-nested code conservatively preserves its text field
+  ---
+  duration_ms: 0.4506
+  type: 'test'
+  ...
+# Subtest: indented code paragraphs stay intact while surrounding prose is filtered
+ok 62 - indented code paragraphs stay intact while surrounding prose is filtered
+  ---
+  duration_ms: 0.5439
+  type: 'test'
+  ...
+# Subtest: backticks inside indented code cannot erase its original indentation context
+ok 63 - backticks inside indented code cannot erase its original indentation context
+  ---
+  duration_ms: 0.4395
+  type: 'test'
+  ...
+# Subtest: deep quote prefixes cannot monopolize the event loop through backtracking
+ok 64 - deep quote prefixes cannot monopolize the event loop through backtracking
+  ---
+  duration_ms: 60.1752
+  type: 'test'
+  ...
+# Subtest: literal terms can cross ordinary paragraph breaks
+ok 65 - literal terms can cross ordinary paragraph breaks
+  ---
+  duration_ms: 0.5498
+  type: 'test'
+  ...
+# Subtest: Responses text is copied while tool arguments, outputs, schemas and opaque state remain intact
+ok 66 - Responses text is copied while tool arguments, outputs, schemas and opaque state remain intact
+  ---
+  duration_ms: 1.202
+  type: 'test'
+  ...
+# Subtest: annotated, signed, unknown and tool-role content is not reinterpreted as prose
+ok 67 - annotated, signed, unknown and tool-role content is not reinterpreted as prose
+  ---
+  duration_ms: 0.5659
+  type: 'test'
+  ...
+# Subtest: empty output logprobs preserve copy-on-write, Markdown and opaque siblings
+ok 68 - empty output logprobs preserve copy-on-write, Markdown and opaque siblings
+  ---
+  duration_ms: 0.7696
+  type: 'test'
+  ...
+# Subtest: only empty output logprobs qualify and unknown metadata stays byte-identical
+ok 69 - only empty output logprobs qualify and unknown metadata stays byte-identical
+  ---
+  duration_ms: 37.5014
+  type: 'test'
+  ...
+# Subtest: empty output logprobs do not broaden roles or change protected prose bytes
+ok 70 - empty output logprobs do not broaden roles or change protected prose bytes
+  ---
+  duration_ms: 1.2056
+  type: 'test'
+  ...
+# Subtest: string input is filtered without synthesizing missing history
+ok 71 - string input is filtered without synthesizing missing history
+  ---
+  duration_ms: 0.2286
+  type: 'test'
+  ...
+# Subtest: missing or empty local configuration does nothing; malformed and oversized files fail closed
+ok 72 - missing or empty local configuration does nothing; malformed and oversized files fail closed
+  ---
+  duration_ms: 16.6561
+  type: 'test'
+  ...
+# Subtest: output text with empty logprobs is filtered while portable replay is off
+ok 73 - output text with empty logprobs is filtered while portable replay is off
+  ---
+  duration_ms: 0.9208
+  type: 'test'
+  ...
+# Subtest: request option combinations keep empty-logprobs filtering and replay independent
+ok 74 - request option combinations keep empty-logprobs filtering and replay independent
+  ---
+  duration_ms: 1.3656
+  type: 'test'
+  ...
+# Subtest: request filtering is independent of portable replay and removes only stale integrity headers
+ok 75 - request filtering is independent of portable replay and removes only stale integrity headers
+  ---
+  duration_ms: 0.4565
+  type: 'test'
+  ...
+# Subtest: non-matches and unsupported request bodies are byte-identical
+ok 76 - non-matches and unsupported request bodies are byte-identical
+  ---
+  duration_ms: 5.4994
+  type: 'test'
+  ...
+# Subtest: cloned Request filtering preserves the original stream
+ok 77 - cloned Request filtering preserves the original stream
+  ---
+  duration_ms: 5.4324
+  type: 'test'
+  ...
+# Subtest: filtering and inline replay compose without dropping call IDs or changing opaque reasoning
+ok 78 - filtering and inline replay compose without dropping call IDs or changing opaque reasoning
+  ---
+  duration_ms: 0.5091
+  type: 'test'
+  ...
+# Subtest: preloaded filter is applied independently of portable replay in all four combinations
+ok 79 - preloaded filter is applied independently of portable replay in all four combinations
+  ---
+  duration_ms: 1.0611
+  type: 'test'
+  ...
+# Subtest: a loaded filter is a snapshot: later file edits do not change it, and null disables it
+ok 80 - a loaded filter is a snapshot: later file edits do not change it, and null disables it
+  ---
+  duration_ms: 7.5951
+  type: 'test'
+  ...
+# Subtest: preservation: configured terms cannot span an existing replacement marker
+ok 81 - preservation: configured terms cannot span an existing replacement marker
+  ---
+  duration_ms: 0.7673
+  type: 'test'
+  ...
+# Subtest: preservation: a multiline term cannot consume the boundary before indented code
+ok 82 - preservation: a multiline term cannot consume the boundary before indented code
+  ---
+  duration_ms: 0.3613
+  type: 'test'
+  ...
+# Subtest: preservation: indented boundaries keep exact separators with "\\n"
+ok 83 - preservation: indented boundaries keep exact separators with "\\n"
+  ---
+  duration_ms: 1.2516
+  type: 'test'
+  ...
+# Subtest: preservation: newline terms cannot collapse an opening fence with "\\n"
+ok 84 - preservation: newline terms cannot collapse an opening fence with "\\n"
+  ---
+  duration_ms: 0.5399
+  type: 'test'
+  ...
+# Subtest: preservation: newline terms cannot consume closing fence boundaries with "\\n"
+ok 85 - preservation: newline terms cannot consume closing fence boundaries with "\\n"
+  ---
+  duration_ms: 0.6947
+  type: 'test'
+  ...
+# Subtest: preservation: indented boundaries keep exact separators with "\\r\\n"
+ok 86 - preservation: indented boundaries keep exact separators with "\\r\\n"
+  ---
+  duration_ms: 1.2125
+  type: 'test'
+  ...
+# Subtest: preservation: newline terms cannot collapse an opening fence with "\\r\\n"
+ok 87 - preservation: newline terms cannot collapse an opening fence with "\\r\\n"
+  ---
+  duration_ms: 0.3151
+  type: 'test'
+  ...
+# Subtest: preservation: newline terms cannot consume closing fence boundaries with "\\r\\n"
+ok 88 - preservation: newline terms cannot consume closing fence boundaries with "\\r\\n"
+  ---
+  duration_ms: 0.6922
+  type: 'test'
+  ...
+# Subtest: the known arg1 vector is solved without executing remote JavaScript
+ok 89 - the known arg1 vector is solved without executing remote JavaScript
+  ---
+  duration_ms: 1.5314
+  type: 'test'
+  ...
+# Subtest: expiry, negative Max-Age and domain/path scopes survive persistence
+ok 90 - expiry, negative Max-Age and domain/path scopes survive persistence
+  ---
+  duration_ms: 31.7452
+  type: 'test'
+  ...
+# Subtest: positive Max-Age is a fixed deadline, not extended by reads/restarts
+ok 91 - positive Max-Age is a fixed deadline, not extended by reads/restarts
+  ---
+  duration_ms: 0.6718
+  type: 'test'
+  ...
+# Subtest: valid __Host prefix survives restore; malformed stored state never falls back
+ok 92 - valid __Host prefix survives restore; malformed stored state never falls back
+  ---
+  duration_ms: 9.5208
+  type: 'test'
+  ...
+# Subtest: a challenge GET cannot resurrect a server-deleted login cookie
+ok 93 - a challenge GET cannot resurrect a server-deleted login cookie
+  ---
+  duration_ms: 5.5827
+  type: 'test'
+  ...
+# Subtest: one operation retains warmup rotation for the single check-in POST
+ok 94 - one operation retains warmup rotation for the single check-in POST
+  ---
+  duration_ms: 3.23
+  type: 'test'
+  ...
+# Subtest: new credentials persist a jar and generation, not duplicated raw Cookie strings
+ok 95 - new credentials persist a jar and generation, not duplicated raw Cookie strings
+  ---
+  duration_ms: 1.1387
+  type: 'test'
+  ...
+# Subtest: a pre-aborted operation issues zero site requests
+ok 96 - a pre-aborted operation issues zero site requests
+  ---
+  duration_ms: 0.3081
+  type: 'test'
+  ...
+# Subtest: declaredModels returns the 16 default-group models with complete model shapes
+ok 97 - declaredModels returns the 16 default-group models with complete model shapes
+  ---
+  duration_ms: 2.6543
+  type: 'test'
+  ...
+# Subtest: GPT/Gemini entries use the Responses API; Claude and cc-format inherit Anthropic
+ok 98 - GPT/Gemini entries use the Responses API; Claude and cc-format inherit Anthropic
+  ---
+  duration_ms: 0.3763
+  type: 'test'
+  ...
+# Subtest: declaredModels returns fresh top-level and nested limit/capability objects each call
+ok 99 - declaredModels returns fresh top-level and nested limit/capability objects each call
+  ---
+  duration_ms: 0.268
+  type: 'test'
+  ...
+# Subtest: declaredModels keeps per-model api objects independent across calls
+ok 100 - declaredModels keeps per-model api objects independent across calls
+  ---
+  duration_ms: 0.1694
+  type: 'test'
+  ...
+# Subtest: JSON transformed diagnostics redact credential echoes in codes and messages
+ok 101 - JSON transformed diagnostics redact credential echoes in codes and messages
+  ---
+  duration_ms: 57.9894
+  type: 'test'
+  ...
+# Subtest: SSE transformed diagnostics redact credential echoes in codes and messages
+ok 102 - SSE transformed diagnostics redact credential echoes in codes and messages
+  ---
+  duration_ms: 4.3795
+  type: 'test'
+  ...
+# Subtest: diagnostic hints derived from an upstream model/id string are also redacted
+ok 103 - diagnostic hints derived from an upstream model/id string are also redacted
+  ---
+  duration_ms: 4.0031
+  type: 'test'
+  ...
+# Subtest: structured unknown error codes are not copied into transformed diagnostics
+ok 104 - structured unknown error codes are not copied into transformed diagnostics
+  ---
+  duration_ms: 3.0025
+  type: 'test'
+  ...
+# Subtest: JSON deeply nested opaque response metadata releases unchanged without a stack overflow
+ok 105 - JSON deeply nested opaque response metadata releases unchanged without a stack overflow
+  ---
+  duration_ms: 1.9542
+  type: 'test'
+  ...
+# Subtest: SSE deeply nested opaque response metadata releases unchanged without a stack overflow
+ok 106 - SSE deeply nested opaque response metadata releases unchanged without a stack overflow
+  ---
+  duration_ms: 6.4034
+  type: 'test'
+  ...
+# Subtest: an apparently empty completion with future response state is not repackaged as a proven empty failure
+ok 107 - an apparently empty completion with future response state is not repackaged as a proven empty failure
+  ---
+  duration_ms: 0.7554
+  type: 'test'
+  ...
+# Subtest: an apparently empty completion with signed top-level event is not repackaged as a proven empty failure
+ok 108 - an apparently empty completion with signed top-level event is not repackaged as a proven empty failure
+  ---
+  duration_ms: 0.387
+  type: 'test'
+  ...
+# Subtest: an apparently empty completion with unknown usage state is not repackaged as a proven empty failure
+ok 109 - an apparently empty completion with unknown usage state is not repackaged as a proven empty failure
+  ---
+  duration_ms: 0.6162
+  type: 'test'
+  ...
+# Subtest: an apparently empty completion with nonzero reasoning usage is not repackaged as a proven empty failure
+ok 110 - an apparently empty completion with nonzero reasoning usage is not repackaged as a proven empty failure
+  ---
+  duration_ms: 0.7304
+  type: 'test'
+  ...
+# Subtest: a known prelude with opaque reasoning effort releases before a later error
+ok 111 - a known prelude with opaque reasoning effort releases before a later error
+  ---
+  duration_ms: 0.5852
+  type: 'test'
+  ...
+# Subtest: a known prelude with opaque text format releases before a later error
+ok 112 - a known prelude with opaque text format releases before a later error
+  ---
+  duration_ms: 0.3487
+  type: 'test'
+  ...
+# Subtest: a known prelude with opaque instruction field releases before a later error
+ok 113 - a known prelude with opaque instruction field releases before a later error
+  ---
+  duration_ms: 0.3801
+  type: 'test'
+  ...
+# Subtest: a known prelude with future tool declaration releases before a later error
+ok 114 - a known prelude with future tool declaration releases before a later error
+  ---
+  duration_ms: 0.3188
+  type: 'test'
+  ...
+# Subtest: a known prelude with opaque numeric config releases before a later error
+ok 115 - a known prelude with opaque numeric config releases before a later error
+  ---
+  duration_ms: 0.3315
+  type: 'test'
+  ...
+# Subtest: known all-zero terminal metadata can still produce the explicit empty-response diagnostic
+ok 116 - known all-zero terminal metadata can still produce the explicit empty-response diagnostic
+  ---
+  duration_ms: 0.4685
+  type: 'test'
+  ...
+# Subtest: semantic output remains byte-identical even when it intentionally mentions a synthetic credential
+ok 117 - semantic output remains byte-identical even when it intentionally mentions a synthetic credential
+  ---
+  duration_ms: 4.6954
+  type: 'test'
+  ...
+# Subtest: invalid UTF-8 in an SSE frame releases its original bytes instead of inventing a parsed error
+ok 118 - invalid UTF-8 in an SSE frame releases its original bytes instead of inventing a parsed error
+  ---
+  duration_ms: 1.0963
+  type: 'test'
+  ...
+# Subtest: a rewritten diagnostic removes stale digest headers but retains unrelated metadata
+ok 119 - a rewritten diagnostic removes stale digest headers but retains unrelated metadata
+  ---
+  duration_ms: 0.5796
+  type: 'test'
+  ...
+# Subtest: single-quota precision stays nonzero at valid rate 1000000000001
+ok 120 - single-quota precision stays nonzero at valid rate 1000000000001
+  ---
+  duration_ms: 1.1214
+  type: 'test'
+  ...
+# Subtest: single-quota precision stays nonzero at valid rate 9007199254740991
+ok 121 - single-quota precision stays nonzero at valid rate 9007199254740991
+  ---
+  duration_ms: 0.1566
+  type: 'test'
+  ...
+# Subtest: one alternate conversion rate governs balance, numeric wallet, total and today's single quota
+ok 122 - one alternate conversion rate governs balance, numeric wallet, total and today's single quota
+  ---
+  duration_ms: 21.6754
+  type: 'test'
+  ...
+# Subtest: duplicate pages without IDs produces unknown daily usage, never a partial or zero estimate
+ok 123 - duplicate pages without IDs produces unknown daily usage, never a partial or zero estimate
+  ---
+  duration_ms: 4.4312
+  type: 'test'
+  ...
+# Subtest: overlapping consume-log IDs produces unknown daily usage, never a partial or zero estimate
+ok 124 - overlapping consume-log IDs produces unknown daily usage, never a partial or zero estimate
+  ---
+  duration_ms: 2.3937
+  type: 'test'
+  ...
+# Subtest: wrong account in a log row produces unknown daily usage, never a partial or zero estimate
+ok 125 - wrong account in a log row produces unknown daily usage, never a partial or zero estimate
+  ---
+  duration_ms: 1.4872
+  type: 'test'
+  ...
+# Subtest: more records than the declared total produces unknown daily usage, never a partial or zero estimate
+ok 126 - more records than the declared total produces unknown daily usage, never a partial or zero estimate
+  ---
+  duration_ms: 1.2586
+  type: 'test'
+  ...
+# Subtest: wrong page number produces unknown daily usage, never a partial or zero estimate
+ok 127 - wrong page number produces unknown daily usage, never a partial or zero estimate
+  ---
+  duration_ms: 1.2378
+  type: 'test'
+  ...
+# Subtest: cancelling the stat stops fallback/pagination without publishing a partial result
+ok 128 - cancelling the stat stops fallback/pagination without publishing a partial result
+  ---
+  duration_ms: 2.4908
+  type: 'test'
+  ...
+# Subtest: cancelling the log page stops fallback/pagination without publishing a partial result
+ok 129 - cancelling the log page stops fallback/pagination without publishing a partial result
+  ---
+  duration_ms: 1.6389
+  type: 'test'
+  ...
+# Subtest: Anthropic protocol sets Claude Code identity and replaces, then removes, incoming credentials
+ok 130 - Anthropic protocol sets Claude Code identity and replaces, then removes, incoming credentials
+  ---
+  duration_ms: 21.0897
+  type: 'test'
+  ...
+# Subtest: Responses protocol sets Codex identity, fills Responses Lite flags and mirrors x-session-id
+ok 131 - Responses protocol sets Codex identity, fills Responses Lite flags and mirrors x-session-id
+  ---
+  duration_ms: 0.2615
+  type: 'test'
+  ...
+# Subtest: Responses protocol preserves a recognized Codex UA and originator
+ok 132 - Responses protocol preserves a recognized Codex UA and originator
+  ---
+  duration_ms: 0.2233
+  type: 'test'
+  ...
+# Subtest: account custom headers override client defaults but cannot replace managed credentials
+ok 133 - account custom headers override client defaults but cannot replace managed credentials
+  ---
+  duration_ms: 0.8405
+  type: 'test'
+  ...
+# Subtest: compatibility=false does not add any client identity on either protocol
+ok 134 - compatibility=false does not add any client identity on either protocol
+  ---
+  duration_ms: 0.2131
+  type: 'test'
+  ...
+# Subtest: browserHeaders carries Chrome fingerprint fields but leaves origin/referer to the site client
+ok 135 - browserHeaders carries Chrome fingerprint fields but leaves origin/referer to the site client
+  ---
+  duration_ms: 0.2486
+  type: 'test'
+  ...
+# Subtest: installed host RPC: login prompts, jar persistence, rotation/check-in, missing-key guard and one fetch per request
+ok 136 - installed host RPC: login prompts, jar persistence, rotation/check-in, missing-key guard and one fetch per request # SKIP Set MAGPIE_TEST_HOST and MAGPIE_TEST_BUN for isolated loopback RPC verification.
+  ---
+  duration_ms: 0.6941
+  type: 'test'
+  ...
+# Subtest: installed host RPC: authoritative account models, config/runtime SDKs, fallback/empty lists and independent switches
+ok 137 - installed host RPC: authoritative account models, config/runtime SDKs, fallback/empty lists and independent switches # SKIP Set MAGPIE_TEST_HOST and MAGPIE_TEST_BUN for isolated loopback RPC verification.
+  ---
+  duration_ms: 0.1249
+  type: 'test'
+  ...
+# Subtest: isolated real Magpie CLI: verified Bun fence, plugin add/list, native-key login and offline quota
+ok 138 - isolated real Magpie CLI: verified Bun fence, plugin add/list, native-key login and offline quota # SKIP Set MAGPIE_TEST_BINARY and MAGPIE_TEST_BUN for a test-local offline CLI session.
+  ---
+  duration_ms: 0.246
+  type: 'test'
+  ...
+# Subtest: explicit Key ID fetches only that token instead of guessing from a list
+ok 139 - explicit Key ID fetches only that token instead of guessing from a list
+  ---
+  duration_ms: 38.4698
+  type: 'test'
+  ...
+# Subtest: same Key value under distinct IDs remains ambiguous
+ok 140 - same Key value under distinct IDs remains ambiguous
+  ---
+  duration_ms: 1.8156
+  type: 'test'
+  ...
+# Subtest: Key selection trims before checking an existing sk- prefix
+ok 141 - Key selection trims before checking an existing sk- prefix
+  ---
+  duration_ms: 0.9411
+  type: 'test'
+  ...
+# Subtest: Key discovery rejects foreign owner without mutating the site
+ok 142 - Key discovery rejects foreign owner without mutating the site
+  ---
+  duration_ms: 2.3683
+  type: 'test'
+  ...
+# Subtest: Key discovery rejects invalid owner without mutating the site
+ok 143 - Key discovery rejects invalid owner without mutating the site
+  ---
+  duration_ms: 1.3922
+  type: 'test'
+  ...
+# Subtest: Key discovery rejects missing ID without mutating the site
+ok 144 - Key discovery rejects missing ID without mutating the site
+  ---
+  duration_ms: 0.7921
+  type: 'test'
+  ...
+# Subtest: Key discovery rejects missing expiration without mutating the site
+ok 145 - Key discovery rejects missing expiration without mutating the site
+  ---
+  duration_ms: 0.6286
+  type: 'test'
+  ...
+# Subtest: Key discovery rejects unknown remaining quota without mutating the site
+ok 146 - Key discovery rejects unknown remaining quota without mutating the site
+  ---
+  duration_ms: 0.5872
+  type: 'test'
+  ...
+# Subtest: Key discovery rejects masked key without mutating the site
+ok 147 - Key discovery rejects masked key without mutating the site
+  ---
+  duration_ms: 0.7738
+  type: 'test'
+  ...
+# Subtest: Key discovery rejects non-ASCII key without mutating the site
+ok 148 - Key discovery rejects non-ASCII key without mutating the site
+  ---
+  duration_ms: 0.9951
+  type: 'test'
+  ...
+# Subtest: invalid explicit IDs are rejected before any request
+ok 149 - invalid explicit IDs are rejected before any request
+  ---
+  duration_ms: 0.7376
+  type: 'test'
+  ...
+# Subtest: a requested ID cannot silently select a different returned token
+ok 150 - a requested ID cannot silently select a different returned token
+  ---
+  duration_ms: 0.6144
+  type: 'test'
+  ...
+# Subtest: login with an explicit unavailable Key ID fails instead of saving a guessed inference key
+ok 151 - login with an explicit unavailable Key ID fails instead of saving a guessed inference key
+  ---
+  duration_ms: 4.3152
+  type: 'test'
+  ...
+# Subtest: ambiguous optional discovery saves a balance-only account, never one of the keys
+ok 152 - ambiguous optional discovery saves a balance-only account, never one of the keys
+  ---
+  duration_ms: 2.9673
+  type: 'test'
+  ...
+# Subtest: non-ASCII native API keys fail locally before header conversion can echo them
+ok 153 - non-ASCII native API keys fail locally before header conversion can echo them
+  ---
+  duration_ms: 2.3418
+  type: 'test'
+  ...
+# Subtest: whitelisted numeric upstream statuses in explicit errors replace a false HTTP200 success
+ok 154 - whitelisted numeric upstream statuses in explicit errors replace a false HTTP200 success
+  ---
+  duration_ms: 26.8337
+  type: 'test'
+  ...
+# Subtest: whitelisted transient codes map conservatively and retain Retry-After
+ok 155 - whitelisted transient codes map conservatively and retain Retry-After
+  ---
+  duration_ms: 2.3566
+  type: 'test'
+  ...
+# Subtest: business errors take precedence over transient status and wording
+ok 156 - business errors take precedence over transient status and wording
+  ---
+  duration_ms: 3.7952
+  type: 'test'
+  ...
+# Subtest: nested error envelopes retain outer status and veto business markers at every layer
+ok 157 - nested error envelopes retain outer status and veto business markers at every layer
+  ---
+  duration_ms: 2.6002
+  type: 'test'
+  ...
+# Subtest: unknown status, malformed numeric strings and detail-less failures stay byte-identical
+ok 158 - unknown status, malformed numeric strings and detail-less failures stay byte-identical
+  ---
+  duration_ms: 1.6214
+  type: 'test'
+  ...
+# Subtest: wire HTTP200 event:error with api_error payload becomes an explicit 429
+ok 159 - wire HTTP200 event:error with api_error payload becomes an explicit 429
+  ---
+  duration_ms: 1.0177
+  type: 'test'
+  ...
+# Subtest: configured rate-limit retry wait reaches token and generic JSON/SSE failures
+ok 160 - configured rate-limit retry wait reaches token and generic JSON/SSE failures
+  ---
+  duration_ms: 10.4203
+  type: 'test'
+  ...
+# Subtest: provider options set the retry wait and explicit provider config wins
+ok 161 - provider options set the retry wait and explicit provider config wins
+  ---
+  duration_ms: 33.0266
+  type: 'test'
+  ...
+# Subtest: invalid retry wait configuration falls back to ten seconds
+ok 162 - invalid retry wait configuration falls back to ten seconds
+  ---
+  duration_ms: 4.6973
+  type: 'test'
+  ...
+# Subtest: configured retry wait preserves upstream seconds, dates and millisecond hints
+ok 163 - configured retry wait preserves upstream seconds, dates and millisecond hints
+  ---
+  duration_ms: 3.6708
+  type: 'test'
+  ...
+# Subtest: retry wait configuration stays scoped to each provider instance
+ok 164 - retry wait configuration stays scoped to each provider instance
+  ---
+  duration_ms: 7.584
+  type: 'test'
+  ...
+# Subtest: configured retry wait leaves non-rate errors and unknown HTTP429 bodies unchanged
+ok 165 - configured retry wait leaves non-rate errors and unknown HTTP429 bodies unchanged
+  ---
+  duration_ms: 1.1606
+  type: 'test'
+  ...
+# Subtest: nested JSON message in response.failed after metadata is recognized
+ok 166 - nested JSON message in response.failed after metadata is recognized
+  ---
+  duration_ms: 0.3739
+  type: 'test'
+  ...
+# Subtest: a JSON error in HTTP200 is recognized without matching successful output text
+ok 167 - a JSON error in HTTP200 is recognized without matching successful output text
+  ---
+  duration_ms: 0.5002
+  type: 'test'
+  ...
+# Subtest: rate errors preserve upstream wait and request id, remove stale entity metadata
+ok 168 - rate errors preserve upstream wait and request id, remove stale entity metadata
+  ---
+  duration_ms: 0.3193
+  type: 'test'
+  ...
+# Subtest: an HTTP-date Retry-After is retained verbatim
+ok 169 - an HTTP-date Retry-After is retained verbatim
+  ---
+  duration_ms: 0.2202
+  type: 'test'
+  ...
+# Subtest: explicit streamed content refusal becomes 400, not 429
+ok 170 - explicit streamed content refusal becomes 400, not 429
+  ---
+  duration_ms: 0.3857
+  type: 'test'
+  ...
+# Subtest: tiny byte chunks, UTF8 comments, CRLF and metadata cannot hide an early failure
+ok 171 - tiny byte chunks, UTF8 comments, CRLF and metadata cannot hide an early failure
+  ---
+  duration_ms: 2.8163
+  type: 'test'
+  ...
+# Subtest: a completed empty output with zero input/output is 502, never a fabricated cap
+ok 172 - a completed empty output with zero input/output is 502, never a fabricated cap
+  ---
+  duration_ms: 0.506
+  type: 'test'
+  ...
+# Subtest: missing usage or nonempty tool output must not count as an empty completion
+ok 173 - missing usage or nonempty tool output must not count as an empty completion
+  ---
+  duration_ms: 0.5795
+  type: 'test'
+  ...
+# Subtest: a healthy answer quoting rate-limit words remains byte-identical
+ok 174 - a healthy answer quoting rate-limit words remains byte-identical
+  ---
+  duration_ms: 0.3517
+  type: 'test'
+  ...
+# Subtest: a live answer is released at first content, without waiting for stream completion
+ok 175 - a live answer is released at first content, without waiting for stream completion
+  ---
+  duration_ms: 0.3447
+  type: 'test'
+  ...
+# Subtest: late errors after reasoning, refusal or tool call are preserved, not retried
+ok 176 - late errors after reasoning, refusal or tool call are preserved, not retried
+  ---
+  duration_ms: 0.7328
+  type: 'test'
+  ...
+# Subtest: unknown and non-text semantic events release before any later error
+ok 177 - unknown and non-text semantic events release before any later error
+  ---
+  duration_ms: 1.3185
+  type: 'test'
+  ...
+# Subtest: mixed SSE newlines, multiline data and byte-split UTF8 still classify early failure
+ok 178 - mixed SSE newlines, multiline data and byte-split UTF8 still classify early failure
+  ---
+  duration_ms: 1.2204
+  type: 'test'
+  ...
+# Subtest: unknown errors and truncated preludes remain unchanged
+ok 179 - unknown errors and truncated preludes remain unchanged
+  ---
+  duration_ms: 0.6674
+  type: 'test'
+  ...
+# Subtest: an Anthropic error after content-free prelude events is diagnosed, not released
+ok 180 - an Anthropic error after content-free prelude events is diagnosed, not released
+  ---
+  duration_ms: 0.3881
+  type: 'test'
+  ...
+# Subtest: Anthropic content_block_delta text releases the stream before a late error
+ok 181 - Anthropic content_block_delta text releases the stream before a late error
+  ---
+  duration_ms: 0.2179
+  type: 'test'
+  ...
+# Subtest: Anthropic tool-input deltas and message_stop are recognized as known events
+ok 182 - Anthropic tool-input deltas and message_stop are recognized as known events
+  ---
+  duration_ms: 0.4129
+  type: 'test'
+  ...
+# Subtest: the loader sends exactly one upstream request and never retries a rate-limit refusal
+ok 183 - the loader sends exactly one upstream request and never retries a rate-limit refusal
+  ---
+  duration_ms: 6.7093
+  type: 'test'
+  ...
+# Subtest: the loader never retries a transport-level server failure either
+ok 184 - the loader never retries a transport-level server failure either
+  ---
+  duration_ms: 1.6353
+  type: 'test'
+  ...
+# Subtest: config declarations have host-supported provider and modality fields, never runtime-only objects
+ok 185 - config declarations have host-supported provider and modality fields, never runtime-only objects
+  ---
+  duration_ms: 1.6367
+  type: 'test'
+  ...
+# Subtest: host placeholder SDKs do not override undeclared authenticated GPT and Claude routing
+ok 186 - host placeholder SDKs do not override undeclared authenticated GPT and Claude routing
+  ---
+  duration_ms: 16.9276
+  type: 'test'
+  ...
+# Subtest: declared image/reasoning flags survive a host-filled false capability schema
+ok 187 - declared image/reasoning flags survive a host-filled false capability schema
+  ---
+  duration_ms: 1.4318
+  type: 'test'
+  ...
+# Subtest: unknown host-filled false flags are not proof against authenticated or registry capabilities
+ok 188 - unknown host-filled false flags are not proof against authenticated or registry capabilities
+  ---
+  duration_ms: 0.3792
+  type: 'test'
+  ...
+# Subtest: explicit false and modality lists are authoritative over inherited capabilities
+ok 189 - explicit false and modality lists are authoritative over inherited capabilities
+  ---
+  duration_ms: 0.4227
+  type: 'test'
+  ...
+# Subtest: successful account catalogs include discovered aliases only, not manual or public-only IDs
+ok 190 - successful account catalogs include discovered aliases only, not manual or public-only IDs
+  ---
+  duration_ms: 3.7324
+  type: 'test'
+  ...
+# Subtest: a successful empty catalog stays empty even with manual models, and skips metadata requests
+ok 191 - a successful empty catalog stays empty even with manual models, and skips metadata requests
+  ---
+  duration_ms: 0.6237
+  type: 'test'
+  ...
+# Subtest: before-login preview remains separate from a balance-only account
+ok 192 - before-login preview remains separate from a balance-only account
+  ---
+  duration_ms: 1.6471
+  type: 'test'
+  ...
+# Subtest: temporary discovery failure returns translated plugin declarations, not arbitrary host defaults
+ok 193 - temporary discovery failure returns translated plugin declarations, not arbitrary host defaults
+  ---
+  duration_ms: 1.7762
+  type: 'test'
+  ...
+# Subtest: HTML WAF 401 and client rejection do not mark a model key expired
+ok 194 - HTML WAF 401 and client rejection do not mark a model key expired
+  ---
+  duration_ms: 3.1137
+  type: 'test'
+  ...
+# Subtest: an explicit foreign model origin is rejected before credential-bearing model discovery
+ok 195 - an explicit foreign model origin is rejected before credential-bearing model discovery
+  ---
+  duration_ms: 0.3402
+  type: 'test'
+  ...
+# Subtest: config hooks do not reinterpret their own defaults as explicit user overrides
+ok 196 - config hooks do not reinterpret their own defaults as explicit user overrides
+  ---
+  duration_ms: 12.2784
+  type: 'test'
+  ...
+# Subtest: model listing cancellation aborts an in-flight registry fetch and returns promptly
+ok 197 - model listing cancellation aborts an in-flight registry fetch and returns promptly
+  ---
+  duration_ms: 0.9129
+  type: 'test'
+  ...
+# Subtest: original registry restores exact model efforts and keeps the maker's input cap to itself
+ok 198 - original registry restores exact model efforts and keeps the maker's input cap to itself
+  ---
+  duration_ms: 3.1332
+  type: 'test'
+  ...
+# Subtest: a registry input cap never lowers the window agents are told; a first-party one does
+ok 199 - a registry input cap never lowers the window agents are told; a first-party one does
+  ---
+  duration_ms: 0.6534
+  type: 'test'
+  ...
+# Subtest: corresponding provider registry takes priority over the manufacturer's profile
+ok 200 - corresponding provider registry takes priority over the manufacturer's profile
+  ---
+  duration_ms: 0.6082
+  type: 'test'
+  ...
+# Subtest: user, authenticated discovery, public provider metadata, registry resolve per field
+ok 201 - user, authenticated discovery, public provider metadata, registry resolve per field
+  ---
+  duration_ms: 0.4616
+  type: 'test'
+  ...
+# Subtest: explicit reasoning false disables variants, including inherited host variants
+ok 202 - explicit reasoning false disables variants, including inherited host variants
+  ---
+  duration_ms: 0.4293
+  type: 'test'
+  ...
+# Subtest: declared empty reasoning controls do not inherit invented effort levels
+ok 203 - declared empty reasoning controls do not inherit invented effort levels
+  ---
+  duration_ms: 1.4017
+  type: 'test'
+  ...
+# Subtest: effort declarations imply reasoning without a redundant boolean
+ok 204 - effort declarations imply reasoning without a redundant boolean
+  ---
+  duration_ms: 0.3378
+  type: 'test'
+  ...
+# Subtest: user variants customize or disable levels without losing other supported levels
+ok 205 - user variants customize or disable levels without losing other supported levels
+  ---
+  duration_ms: 0.3266
+  type: 'test'
+  ...
+# Subtest: an explicit user effort variant takes precedence over an inherited reasoning false
+ok 206 - an explicit user effort variant takes precedence over an inherited reasoning false
+  ---
+  duration_ms: 0.4152
+  type: 'test'
+  ...
+# Subtest: unknown models, malformed metadata and budget controls never invent fixed tiers
+ok 207 - unknown models, malformed metadata and budget controls never invent fixed tiers
+  ---
+  duration_ms: 0.6179
+  type: 'test'
+  ...
+# Subtest: limit aliases do not confuse input ceilings with total context
+ok 208 - limit aliases do not confuse input ceilings with total context
+  ---
+  duration_ms: 0.2234
+  type: 'test'
+  ...
+# Subtest: a smaller provider context cannot inherit an impossible manufacturer input limit
+ok 209 - a smaller provider context cannot inherit an impossible manufacturer input limit
+  ---
+  duration_ms: 0.4117
+  type: 'test'
+  ...
+# Subtest: canonical manufacturer prefixes and dated snapshots retain complete model identity
+ok 210 - canonical manufacturer prefixes and dated snapshots retain complete model identity
+  ---
+  duration_ms: 0.7778
+  type: 'test'
+  ...
+# Subtest: manufacturer declarations tolerate branding case and malformed account ownership fields
+ok 211 - manufacturer declarations tolerate branding case and malformed account ownership fields
+  ---
+  duration_ms: 0.3644
+  type: 'test'
+  ...
+# Subtest: malformed reasoning controls fall through to a known registry declaration
+ok 212 - malformed reasoning controls fall through to a known registry declaration
+  ---
+  duration_ms: 0.6984
+  type: 'test'
+  ...
+# Subtest: declared family fallback requires manufacturer consensus, not a union of efforts
+ok 213 - declared family fallback requires manufacturer consensus, not a union of efforts
+  ---
+  duration_ms: 0.5238
+  type: 'test'
+  ...
+# Subtest: metadata enrichment neither expands account availability nor changes model routing
+ok 214 - metadata enrichment neither expands account availability nor changes model routing
+  ---
+  duration_ms: 21.0538
+  type: 'test'
+  ...
+# Subtest: discovery failure still resolves explicit effort overrides without granting registry-only access
+ok 215 - discovery failure still resolves explicit effort overrides without granting registry-only access
+  ---
+  duration_ms: 3.8038
+  type: 'test'
+  ...
+# Subtest: registry reads raw cache without writes or network, coalesces requests, and reloads
+ok 216 - registry reads raw cache without writes or network, coalesces requests, and reloads
+  ---
+  duration_ms: 12.7672
+  type: 'test'
+  ...
+# Subtest: registry network fallback is bounded, anonymous, cached and single-flight
+ok 217 - registry network fallback is bounded, anonymous, cached and single-flight
+  ---
+  duration_ms: 19.3556
+  type: 'test'
+  ...
+# Subtest: registry failure preserves last successful data without leaking credential headers
+ok 218 - registry failure preserves last successful data without leaking credential headers
+  ---
+  duration_ms: 0.9146
+  type: 'test'
+  ...
+# Subtest: registry cache paths honor XDG and Windows cache locations without Codex catalog writes
+ok 219 - registry cache paths honor XDG and Windows cache locations without Codex catalog writes
+  ---
+  duration_ms: 0.253
+  type: 'test'
+  ...
+# Subtest: package gate validates source metadata, runtime graph and no-network import
+ok 220 - package gate validates source metadata, runtime graph and no-network import
+  ---
+  duration_ms: 1293.7994
+  type: 'test'
+  ...
+# Subtest: package gate refuses a private-file pack report instead of trusting the manifest
+ok 221 - package gate refuses a private-file pack report instead of trusting the manifest
+  ---
+  duration_ms: 1197.8362
+  type: 'test'
+  ...
+# Subtest: Anthropic text precedes an error without losing bytes
+ok 222 - Anthropic text precedes an error without losing bytes
+  ---
+  duration_ms: 26.5384
+  type: 'test'
+  ...
+# Subtest: Anthropic tool_use precedes an error without losing bytes
+ok 223 - Anthropic tool_use precedes an error without losing bytes
+  ---
+  duration_ms: 0.8139
+  type: 'test'
+  ...
+# Subtest: Anthropic server_tool_use precedes an error without losing bytes
+ok 224 - Anthropic server_tool_use precedes an error without losing bytes
+  ---
+  duration_ms: 1.5197
+  type: 'test'
+  ...
+# Subtest: Anthropic redacted_thinking precedes an error without losing bytes
+ok 225 - Anthropic redacted_thinking precedes an error without losing bytes
+  ---
+  duration_ms: 0.5638
+  type: 'test'
+  ...
+# Subtest: Anthropic web_search_tool_result precedes an error without losing bytes
+ok 226 - Anthropic web_search_tool_result precedes an error without losing bytes
+  ---
+  duration_ms: 0.4873
+  type: 'test'
+  ...
+# Subtest: Anthropic future_block precedes an error without losing bytes
+ok 227 - Anthropic future_block precedes an error without losing bytes
+  ---
+  duration_ms: 0.3988
+  type: 'test'
+  ...
+# Subtest: Anthropic message content precedes an error without losing bytes
+ok 228 - Anthropic message content precedes an error without losing bytes
+  ---
+  duration_ms: 0.3113
+  type: 'test'
+  ...
+# Subtest: strictly empty Anthropic text prelude still allows early error diagnosis
+ok 229 - strictly empty Anthropic text prelude still allows early error diagnosis
+  ---
+  duration_ms: 1.9856
+  type: 'test'
+  ...
+# Subtest: JSON partial/opaque output survives ({"output":[{"type":"message","content":[{"type":"output_text","text":"retain"}]}]})
+ok 230 - JSON partial/opaque output survives ({"output":[{"type":"message","content":[{"type":"output_text","text":"retain"}]}]})
+  ---
+  duration_ms: 1.7078
+  type: 'test'
+  ...
+# Subtest: JSON partial/opaque output survives ({"response":{"output":[{"type":"reasoning","encrypted_content":"retain"}]}})
+ok 231 - JSON partial/opaque output survives ({"response":{"output":[{"type":"reasoning","encrypted_content":"retain"}]}})
+  ---
+  duration_ms: 0.5369
+  type: 'test'
+  ...
+# Subtest: JSON partial/opaque output survives ({"content":[{"type":"tool_use","id":"synthetic"}]})
+ok 232 - JSON partial/opaque output survives ({"content":[{"type":"tool_use","id":"synthetic"}]})
+  ---
+  duration_ms: 0.3435
+  type: 'test'
+  ...
+# Subtest: JSON partial/opaque output survives ({"output":[{"type":"unknown_future_output","data":"retain"}]})
+ok 233 - JSON partial/opaque output survives ({"output":[{"type":"unknown_future_output","data":"retain"}]})
+  ---
+  duration_ms: 0.3024
+  type: 'test'
+  ...
+# Subtest: signed and unknown Codex items are not reinterpreted; assistant text remains output_text
+ok 234 - signed and unknown Codex items are not reinterpreted; assistant text remains output_text
+  ---
+  duration_ms: 1.5864
+  type: 'test'
+  ...
+# Subtest: portable history does not detach signed or resource-only contents: fc_signed
+ok 235 - portable history does not detach signed or resource-only contents: fc_signed
+  ---
+  duration_ms: 0.5544
+  type: 'test'
+  ...
+# Subtest: portable history does not detach signed or resource-only contents: fco_signed
+ok 236 - portable history does not detach signed or resource-only contents: fco_signed
+  ---
+  duration_ms: 0.1598
+  type: 'test'
+  ...
+# Subtest: portable history does not detach signed or resource-only contents: fc_opaque
+ok 237 - portable history does not detach signed or resource-only contents: fc_opaque
+  ---
+  duration_ms: 0.1081
+  type: 'test'
+  ...
+# Subtest: portable history does not detach signed or resource-only contents: msg_signed_part
+ok 238 - portable history does not detach signed or resource-only contents: msg_signed_part
+  ---
+  duration_ms: 0.2023
+  type: 'test'
+  ...
+# Subtest: portable history does not detach signed or resource-only contents: msg_file_ref
+ok 239 - portable history does not detach signed or resource-only contents: msg_file_ref
+  ---
+  duration_ms: 0.0954
+  type: 'test'
+  ...
+# Subtest: unknown fields in a known response.created prelude release before a later error
+ok 240 - unknown fields in a known response.created prelude release before a later error
+  ---
+  duration_ms: 0.7198
+  type: 'test'
+  ...
+# Subtest: unknown fields in a known response.in_progress prelude release before a later error
+ok 241 - unknown fields in a known response.in_progress prelude release before a later error
+  ---
+  duration_ms: 0.3004
+  type: 'test'
+  ...
+# Subtest: unknown fields in a known response.output_item.added prelude release before a later error
+ok 242 - unknown fields in a known response.output_item.added prelude release before a later error
+  ---
+  duration_ms: 0.277
+  type: 'test'
+  ...
+# Subtest: unknown fields in a known message_start prelude release before a later error
+ok 243 - unknown fields in a known message_start prelude release before a later error
+  ---
+  duration_ms: 0.2257
+  type: 'test'
+  ...
+# Subtest: unknown fields in a known message_delta prelude release before a later error
+ok 244 - unknown fields in a known message_delta prelude release before a later error
+  ---
+  duration_ms: 0.2421
+  type: 'test'
+  ...
+# Subtest: Codex default compatibility does not invent a reasoning effort
+ok 245 - Codex default compatibility does not invent a reasoning effort
+  ---
+  duration_ms: 0.2674
+  type: 'test'
+  ...
+# Subtest: detaching server context rejects orphan function_call_output
+ok 246 - detaching server context rejects orphan function_call_output
+  ---
+  duration_ms: 0.7454
+  type: 'test'
+  ...
+# Subtest: detaching server context rejects orphan custom_tool_call_output
+ok 247 - detaching server context rejects orphan custom_tool_call_output
+  ---
+  duration_ms: 0.1441
+  type: 'test'
+  ...
+# Subtest: Anthropic body and beta URL change together; GET requests do not transform
+ok 248 - Anthropic body and beta URL change together; GET requests do not transform
+  ---
+  duration_ms: 0.4624
+  type: 'test'
+  ...
+# Subtest: client switches stay independent (false/false)
+ok 249 - client switches stay independent (false/false)
+  ---
+  duration_ms: 10.6883
+  type: 'test'
+  ...
+# Subtest: client switches stay independent (false/true)
+ok 250 - client switches stay independent (false/true)
+  ---
+  duration_ms: 2.5381
+  type: 'test'
+  ...
+# Subtest: client switches stay independent (true/false)
+ok 251 - client switches stay independent (true/false)
+  ---
+  duration_ms: 0.986
+  type: 'test'
+  ...
+# Subtest: client switches stay independent (true/true)
+ok 252 - client switches stay independent (true/true)
+  ---
+  duration_ms: 0.9474
+  type: 'test'
+  ...
+# Subtest: foreign and unknown inference destinations are rejected before sending a Key
+ok 253 - foreign and unknown inference destinations are rejected before sending a Key
+  ---
+  duration_ms: 1.2914
+  type: 'test'
+  ...
+# Subtest: model redirects are never followed with credentials
+ok 254 - model redirects are never followed with credentials
+  ---
+  duration_ms: 1.1492
+  type: 'test'
+  ...
+# Subtest: six login methods: five oauth site sign-ins and one native API key
+ok 255 - six login methods: five oauth site sign-ins and one native API key
+  ---
+  duration_ms: 3.2213
+  type: 'test'
+  ...
+# Subtest: password and access-token hand off with method 'auto'; GitHub/LinuxDO/session need a pasted code
+ok 256 - password and access-token hand off with method 'auto'; GitHub/LinuxDO/session need a pasted code
+  ---
+  duration_ms: 19.2721
+  type: 'test'
+  ...
+# Subtest: provider defaults to the AnyRouter Anthropic base with 16 declared models and no fcapp endpoint
+ok 257 - provider defaults to the AnyRouter Anthropic base with 16 declared models and no fcapp endpoint
+  ---
+  duration_ms: 1.3164
+  type: 'test'
+  ...
+# Subtest: an existing provider configuration is preserved, not overwritten
+ok 258 - an existing provider configuration is preserved, not overwritten
+  ---
+  duration_ms: 0.4659
+  type: 'test'
+  ...
+# Subtest: the plugin exposes the six provider options and no legacy retry filter switch
+ok 259 - the plugin exposes the six provider options and no legacy retry filter switch
+  ---
+  duration_ms: 0.4416
+  type: 'test'
+  ...
+# Subtest: password login reads status, logs in and verifies the profile before saving
+ok 260 - password login reads status, logs in and verifies the profile before saving
+  ---
+  duration_ms: 20.172
+  type: 'test'
+  ...
+# Subtest: a provided model key is stored directly; an existing site key is read when omitted
+ok 261 - a provided model key is stored directly; an existing site key is read when omitted
+  ---
+  duration_ms: 9.3379
+  type: 'test'
+  ...
+# Subtest: password login persists the password only when check-in is explicitly enabled
+ok 262 - password login persists the password only when check-in is explicitly enabled
+  ---
+  duration_ms: 5.0943
+  type: 'test'
+  ...
+# Subtest: Turnstile blocks password login without sending credentials
+ok 263 - Turnstile blocks password login without sending credentials
+  ---
+  duration_ms: 1.478
+  type: 'test'
+  ...
+# Subtest: access-token login is read-only, verifies the UID and never opts into check-in
+ok 264 - access-token login is read-only, verifies the UID and never opts into check-in
+  ---
+  duration_ms: 1.3438
+  type: 'test'
+  ...
+# Subtest: GitHub, LinuxDO and browser-session handoffs import a session instead of replaying an OAuth code
+    # Subtest: 1
+    ok 1 - 1
+      ---
+      duration_ms: 10.4244
+      type: 'test'
+      ...
+    # Subtest: 2
+    ok 2 - 2
+      ---
+      duration_ms: 1.892
+      type: 'test'
+      ...
+    # Subtest: 3
+    ok 3 - 3
+      ---
+      duration_ms: 2.7049
+      type: 'test'
+      ...
+    1..3
+ok 265 - GitHub, LinuxDO and browser-session handoffs import a session instead of replaying an OAuth code
+  ---
+  duration_ms: 15.5257
+  type: 'test'
+  ...
+# Subtest: a wrong or unavailable profile fails closed before key lookup or persistence
+    # Subtest: wrong-user
+    ok 1 - wrong-user
+      ---
+      duration_ms: 1.4046
+      type: 'test'
+      ...
+    # Subtest: unavailable
+    ok 2 - unavailable
+      ---
+      duration_ms: 2.4238
+      type: 'test'
+      ...
+    1..2
+ok 266 - a wrong or unavailable profile fails closed before key lookup or persistence
+  ---
+  duration_ms: 4.129
+  type: 'test'
+  ...
+# Subtest: the API-key method never calls the site
+ok 267 - the API-key method never calls the site
+  ---
+  duration_ms: 1.7095
+  type: 'test'
+  ...
+# Subtest: loader rejects a site-only account locally with 400 anyrouter_missing_api_key
+ok 268 - loader rejects a site-only account locally with 400 anyrouter_missing_api_key
+  ---
+  duration_ms: 1.4758
+  type: 'test'
+  ...
+# Subtest: loader blocks a request whose account changed mid-flight with 409 anyrouter_account_changed
+ok 269 - loader blocks a request whose account changed mid-flight with 409 anyrouter_account_changed
+  ---
+  duration_ms: 1.6103
+  type: 'test'
+  ...
+# Subtest: loader sends the model key per protocol and never forwards site credentials
+ok 270 - loader sends the model key per protocol and never forwards site credentials
+  ---
+  duration_ms: 6.412
+  type: 'test'
+  ...
+# Subtest: loader blocks the unsupported native Gemini path before transmitting any key
+ok 271 - loader blocks the unsupported native Gemini path before transmitting any key
+  ---
+  duration_ms: 1.1281
+  type: 'test'
+  ...
+# Subtest: loader maps a model's declared Responses base and adds beta only when Claude compatibility is enabled
+ok 272 - loader maps a model's declared Responses base and adds beta only when Claude compatibility is enabled
+  ---
+  duration_ms: 2.9336
+  type: 'test'
+  ...
+# Subtest: loader performs exactly one upstream fetch and never retries internally
+ok 273 - loader performs exactly one upstream fetch and never retries internally
+  ---
+  duration_ms: 1.703
+  type: 'test'
+  ...
+# Subtest: request diagnostics can be switched off and pass the upstream answer through
+ok 274 - request diagnostics can be switched off and pass the upstream answer through
+  ---
+  duration_ms: 1.7557
+  type: 'test'
+  ...
+# Subtest: chat.headers adds the model hint and a Claude session id only for Anthropic models
+ok 275 - chat.headers adds the model hint and a Claude session id only for Anthropic models
+  ---
+  duration_ms: 0.5107
+  type: 'test'
+  ...
+# Subtest: the published plugin entry builds the same provider without an internal retry filter
+ok 276 - the published plugin entry builds the same provider without an internal retry filter
+  ---
+  duration_ms: 2.0427
+  type: 'test'
+  ...
+# Subtest: send-codex-headers controls the Codex client identity and body adaptation
+ok 277 - send-codex-headers controls the Codex client identity and body adaptation
+  ---
+  duration_ms: 14.7135
+  type: 'test'
+  ...
+# Subtest: claude-code-compat controls the Anthropic system, metadata and context-management shape
+ok 278 - claude-code-compat controls the Anthropic system, metadata and context-management shape
+  ---
+  duration_ms: 3.6932
+  type: 'test'
+  ...
+# Subtest: portable-responses inlines portable history and preserves opaque references
+ok 279 - portable-responses inlines portable history and preserves opaque references
+  ---
+  duration_ms: 3.2273
+  type: 'test'
+  ...
+# Subtest: codex-session-repair only strips resource bindings when explicitly enabled
+ok 280 - codex-session-repair only strips resource bindings when explicitly enabled
+  ---
+  duration_ms: 5.4068
+  type: 'test'
+  ...
+# Subtest: text-filter stays inert without a local word list and never rewrites ordinary prose
+ok 281 - text-filter stays inert without a local word list and never rewrites ordinary prose
+  ---
+  duration_ms: 2.4442
+  type: 'test'
+  ...
+# Subtest: portable inline history does not look up IDs on a different resource
+ok 282 - portable inline history does not look up IDs on a different resource
+  ---
+  duration_ms: 21.0783
+  type: 'test'
+  ...
+# Subtest: rewriting removes stale body-integrity headers but keeps request identity and signal
+ok 283 - rewriting removes stale body-integrity headers but keeps request identity and signal
+  ---
+  duration_ms: 1.0347
+  type: 'test'
+  ...
+# Subtest: Request inputs are cloned without consuming the original body
+ok 284 - Request inputs are cloned without consuming the original body
+  ---
+  duration_ms: 3.9755
+  type: 'test'
+  ...
+# Subtest: provider switch restores exact original body forwarding
+ok 285 - provider switch restores exact original body forwarding
+  ---
+  duration_ms: 0.9598
+  type: 'test'
+  ...
+# Subtest: server-only context is never silently discarded: previous_response_id
+ok 286 - server-only context is never silently discarded: previous_response_id
+  ---
+  duration_ms: 0.2832
+  type: 'test'
+  ...
+# Subtest: server-only context is never silently discarded: conversation
+ok 287 - server-only context is never silently discarded: conversation
+  ---
+  duration_ms: 0.1578
+  type: 'test'
+  ...
+# Subtest: server-only context is never silently discarded: input
+ok 288 - server-only context is never silently discarded: input
+  ---
+  duration_ms: 0.1801
+  type: 'test'
+  ...
+# Subtest: other endpoints stay byte-identical: /v1/chat/completions
+ok 289 - other endpoints stay byte-identical: /v1/chat/completions
+  ---
+  duration_ms: 0.1687
+  type: 'test'
+  ...
+# Subtest: other endpoints stay byte-identical: /v1/responses/compact
+ok 290 - other endpoints stay byte-identical: /v1/responses/compact
+  ---
+  duration_ms: 0.1369
+  type: 'test'
+  ...
+# Subtest: unknown and non-self-contained items retain every field
+ok 291 - unknown and non-self-contained items retain every field
+  ---
+  duration_ms: 0.3091
+  type: 'test'
+  ...
+# Subtest: GET, malformed JSON and encoded bodies stay untouched
+ok 292 - GET, malformed JSON and encoded bodies stay untouched
+  ---
+  duration_ms: 0.35
+  type: 'test'
+  ...
+# Subtest: annotated messages and opaque reasoning remain intact
+ok 293 - annotated messages and opaque reasoning remain intact
+  ---
+  duration_ms: 0.2176
+  type: 'test'
+  ...
+# Subtest: over-limit and explicitly non-JSON bodies are not rewritten
+ok 294 - over-limit and explicitly non-JSON bodies are not rewritten
+  ---
+  duration_ms: 4.406
+  type: 'test'
+  ...
+# Subtest: aborting a stalled Request clone promptly preserves the caller signal
+ok 295 - aborting a stalled Request clone promptly preserves the caller signal
+  ---
+  duration_ms: 16.4845
+  type: 'test'
+  ...
+# Subtest: the direct body bound counts UTF-8 bytes, not UTF-16 code units
+ok 296 - the direct body bound counts UTF-8 bytes, not UTF-16 code units
+  ---
+  duration_ms: 5.5493
+  type: 'test'
+  ...
+# Subtest: explicit non-JSON content type leaves even JSON-looking data alone
+ok 297 - explicit non-JSON content type leaves even JSON-looking data alone
+  ---
+  duration_ms: 0.2572
+  type: 'test'
+  ...
+# Subtest: oversized Request clones stop without consuming the original
+ok 298 - oversized Request clones stop without consuming the original
+  ---
+  duration_ms: 8.9714
+  type: 'test'
+  ...
+# Subtest: a stalled clone respects the preparation deadline
+ok 299 - a stalled clone respects the preparation deadline
+  ---
+  duration_ms: 2008.7668
+  type: 'test'
+  ...
+# Subtest: prepareAnthropicRequest adds Claude system blocks, metadata, beta and removes stale length
+ok 300 - prepareAnthropicRequest adds Claude system blocks, metadata, beta and removes stale length
+  ---
+  duration_ms: 0.8546
+  type: 'test'
+  ...
+# Subtest: prepareAnthropicRequest preserves an existing system array and metadata user id
+ok 301 - prepareAnthropicRequest preserves an existing system array and metadata user id
+  ---
+  duration_ms: 0.221
+  type: 'test'
+  ...
+# Subtest: prepareAnthropicRequest ignores other paths, non-JSON bodies, encoded bodies and disabled compatibility
+ok 302 - prepareAnthropicRequest ignores other paths, non-JSON bodies, encoded bodies and disabled compatibility
+  ---
+  duration_ms: 0.1773
+  type: 'test'
+  ...
+# Subtest: prepareCodexRequest normalizes input, fills Codex defaults and headers
+ok 303 - prepareCodexRequest normalizes input, fills Codex defaults and headers
+  ---
+  duration_ms: 0.5567
+  type: 'test'
+  ...
+# Subtest: prepareCodexRequest preserves existing fields and normalizes array message content
+ok 304 - prepareCodexRequest preserves existing fields and normalizes array message content
+  ---
+  duration_ms: 0.2585
+  type: 'test'
+  ...
+# Subtest: prepareCodexRequest ignores non-Responses paths, GET, malformed and oversized bodies
+ok 305 - prepareCodexRequest ignores non-Responses paths, GET, malformed and oversized bodies
+  ---
+  duration_ms: 2.973
+  type: 'test'
+  ...
+# Subtest: approved server_error code mapping is HTTP 500
+ok 306 - approved server_error code mapping is HTTP 500
+  ---
+  duration_ms: 25.2854
+  type: 'test'
+  ...
+# Subtest: approved numeric strings and msg envelopes are recognized conservatively
+ok 307 - approved numeric strings and msg envelopes are recognized conservatively
+  ---
+  duration_ms: 5.6322
+  type: 'test'
+  ...
+# Subtest: approved busy phrase is classified only in explicit non-business errors
+ok 308 - approved busy phrase is classified only in explicit non-business errors
+  ---
+  duration_ms: 1.4996
+  type: 'test'
+  ...
+# Subtest: A prelude over 64 KiB is released byte-for-byte without more reads
+ok 309 - A prelude over 64 KiB is released byte-for-byte without more reads
+  ---
+  duration_ms: 2.2373
+  type: 'test'
+  ...
+# Subtest: The inspection deadline releases a quiet prelude without losing its pending read
+ok 310 - The inspection deadline releases a quiet prelude without losing its pending read
+  ---
+  duration_ms: 1.3887
+  type: 'test'
+  ...
+# Subtest: Cancelling a replayed body cancels the upstream reader
+ok 311 - Cancelling a replayed body cancels the upstream reader
+  ---
+  duration_ms: 0.8741
+  type: 'test'
+  ...
+# Subtest: JSON inspection accepts exactly 64 KiB but fails open above the byte budget
+ok 312 - JSON inspection accepts exactly 64 KiB but fails open above the byte budget
+  ---
+  duration_ms: 1.2842
+  type: 'test'
+  ...
+# Subtest: Invalid JSON UTF8 fails open instead of classifying replacement characters
+ok 313 - Invalid JSON UTF8 fails open instead of classifying replacement characters
+  ---
+  duration_ms: 0.5897
+  type: 'test'
+  ...
+# Subtest: A stalled JSON clone fails open within the two-second deadline without waiting for cancel
+ok 314 - A stalled JSON clone fails open within the two-second deadline without waiting for cancel
+  ---
+  duration_ms: 2016.6887
+  type: 'test'
+  ...
+# Subtest: JSON inspection leaves out-of-scope statuses and unrecognized envelopes untouched
+ok 315 - JSON inspection leaves out-of-scope statuses and unrecognized envelopes untouched
+  ---
+  duration_ms: 1.3019
+  type: 'test'
+  ...
+# Subtest: Known JSON errors retain the existing HTTP400 and HTTP429 inspection scope
+ok 316 - Known JSON errors retain the existing HTTP400 and HTTP429 inspection scope
+  ---
+  duration_ms: 0.6779
+  type: 'test'
+  ...
+# Subtest: JSON reader errors fail open and preserve the original read error
+ok 317 - JSON reader errors fail open and preserve the original read error
+  ---
+  duration_ms: 0.6879
+  type: 'test'
+  ...
+# Subtest: Replay applies backpressure and never observes late error bytes
+ok 318 - Replay applies backpressure and never observes late error bytes
+  ---
+  duration_ms: 1.1127
+  type: 'test'
+  ...
+# Subtest: Early SSE cancellation does not await an upstream cancel promise
+ok 319 - Early SSE cancellation does not await an upstream cancel promise
+  ---
+  duration_ms: 0.3776
+  type: 'test'
+  ...
+# Subtest: Malformed metadata is unknown data, not a parser exception or an invented 429
+ok 320 - Malformed metadata is unknown data, not a parser exception or an invented 429
+  ---
+  duration_ms: 0.2928
+  type: 'test'
+  ...
+# Subtest: explicit error boundary excludes unrelated JSON wrapper metadata 0
+ok 321 - explicit error boundary excludes unrelated JSON wrapper metadata 0
+  ---
+  duration_ms: 23.0185
+  type: 'test'
+  ...
+# Subtest: explicit error boundary excludes unrelated SSE wrapper metadata 0
+ok 322 - explicit error boundary excludes unrelated SSE wrapper metadata 0
+  ---
+  duration_ms: 2.3231
+  type: 'test'
+  ...
+# Subtest: explicit error boundary excludes unrelated JSON wrapper metadata 1
+ok 323 - explicit error boundary excludes unrelated JSON wrapper metadata 1
+  ---
+  duration_ms: 0.8777
+  type: 'test'
+  ...
+# Subtest: explicit error boundary excludes unrelated SSE wrapper metadata 1
+ok 324 - explicit error boundary excludes unrelated SSE wrapper metadata 1
+  ---
+  duration_ms: 0.591
+  type: 'test'
+  ...
+# Subtest: explicit error boundary excludes unrelated JSON wrapper metadata 2
+ok 325 - explicit error boundary excludes unrelated JSON wrapper metadata 2
+  ---
+  duration_ms: 1.7369
+  type: 'test'
+  ...
+# Subtest: explicit error boundary excludes unrelated SSE wrapper metadata 2
+ok 326 - explicit error boundary excludes unrelated SSE wrapper metadata 2
+  ---
+  duration_ms: 0.664
+  type: 'test'
+  ...
+# Subtest: explicit error boundary excludes unrelated JSON wrapper metadata 3
+ok 327 - explicit error boundary excludes unrelated JSON wrapper metadata 3
+  ---
+  duration_ms: 0.4793
+  type: 'test'
+  ...
+# Subtest: explicit error boundary excludes unrelated SSE wrapper metadata 3
+ok 328 - explicit error boundary excludes unrelated SSE wrapper metadata 3
+  ---
+  duration_ms: 0.4508
+  type: 'test'
+  ...
+# Subtest: selected explicit error retains detail metadata and conservative outer business veto
+ok 329 - selected explicit error retains detail metadata and conservative outer business veto
+  ---
+  duration_ms: 2.8824
+  type: 'test'
+  ...
+# Subtest: invalid or detail-less nested errors cannot inherit wrapper transient fields
+ok 330 - invalid or detail-less nested errors cannot inherit wrapper transient fields
+  ---
+  duration_ms: 1.6196
+  type: 'test'
+  ...
+# Subtest: bounded error inspection fails open at exhaustion instead of using partial ancestors
+ok 331 - bounded error inspection fails open at exhaustion instead of using partial ancestors
+  ---
+  duration_ms: 0.9882
+  type: 'test'
+  ...
+# Subtest: SSE last event field and optional single space determine the observation boundary
+ok 332 - SSE last event field and optional single space determine the observation boundary
+  ---
+  duration_ms: 2.8429
+  type: 'test'
+  ...
+# Subtest: SSE unknown-shaped values under known fields release before a later failure
+ok 333 - SSE unknown-shaped values under known fields release before a later failure
+  ---
+  duration_ms: 5.1402
+  type: 'test'
+  ...
+# Subtest: every nested error boundary rejects empty or unknown leaves without borrowing wrapper prose
+ok 334 - every nested error boundary rejects empty or unknown leaves without borrowing wrapper prose
+  ---
+  duration_ms: 8.867
+  type: 'test'
+  ...
+# Subtest: nested meaningful leaves retain numeric ancestor status and business vetoes
+ok 335 - nested meaningful leaves retain numeric ancestor status and business vetoes
+  ---
+  duration_ms: 3.2754
+  type: 'test'
+  ...
+# Subtest: provider switches keep Chinese labels, bounded lengths and the lossy cleanup default off
+ok 336 - provider switches keep Chinese labels, bounded lengths and the lossy cleanup default off
+  ---
+  duration_ms: 9.1257
+  type: 'test'
+  ...
+# Subtest: resource repair is off by default even when the existing options are on
+ok 337 - resource repair is off by default even when the existing options are on
+  ---
+  duration_ms: 34.9736
+  type: 'test'
+  ...
+# Subtest: only explicit boolean true enables lossy cleanup: false
+ok 338 - only explicit boolean true enables lossy cleanup: false
+  ---
+  duration_ms: 2.9832
+  type: 'test'
+  ...
+# Subtest: only explicit boolean true enables lossy cleanup: undefined
+ok 339 - only explicit boolean true enables lossy cleanup: undefined
+  ---
+  duration_ms: 2.3265
+  type: 'test'
+  ...
+# Subtest: only explicit boolean true enables lossy cleanup: null
+ok 340 - only explicit boolean true enables lossy cleanup: null
+  ---
+  duration_ms: 1.8861
+  type: 'test'
+  ...
+# Subtest: only explicit boolean true enables lossy cleanup: true
+ok 341 - only explicit boolean true enables lossy cleanup: true
+  ---
+  duration_ms: 1.6666
+  type: 'test'
+  ...
+# Subtest: only explicit boolean true enables lossy cleanup: 1
+ok 342 - only explicit boolean true enables lossy cleanup: 1
+  ---
+  duration_ms: 1.5135
+  type: 'test'
+  ...
+# Subtest: older hosts without an option reader never enable resource repair
+ok 343 - older hosts without an option reader never enable resource repair
+  ---
+  duration_ms: 3.4903
+  type: 'test'
+  ...
+# Subtest: repair removes old bindings and opaque history without changing tool data or caller history
+ok 344 - repair removes old bindings and opaque history without changing tool data or caller history
+  ---
+  duration_ms: 1.2403
+  type: 'test'
+  ...
+# Subtest: the cleanup module uses copies and keeps untouched item and tool identities
+ok 345 - the cleanup module uses copies and keeps untouched item and tool identities
+  ---
+  duration_ms: 0.3299
+  type: 'test'
+  ...
+# Subtest: Codex custom tool calls keep free-form input, namespace and the paired result
+ok 346 - Codex custom tool calls keep free-form input, namespace and the paired result
+  ---
+  duration_ms: 0.3281
+  type: 'test'
+  ...
+# Subtest: the installed loader can switch cleanup on and off between requests without re-login
+ok 347 - the installed loader can switch cleanup on and off between requests without re-login
+  ---
+  duration_ms: 3.6535
+  type: 'test'
+  ...
+# Subtest: repair preserves the caller signal, session identity and other headers while removing stale integrity headers
+ok 348 - repair preserves the caller signal, session identity and other headers while removing stale integrity headers
+  ---
+  duration_ms: 0.4609
+  type: 'test'
+  ...
+# Subtest: cloned Request cleanup leaves the original request readable and byte-identical
+ok 349 - cloned Request cleanup leaves the original request readable and byte-identical
+  ---
+  duration_ms: 2.6555
+  type: 'test'
+  ...
+# Subtest: cleanup only touches server-shaped top-level IDs, not business IDs or nested attachments
+ok 350 - cleanup only touches server-shaped top-level IDs, not business IDs or nested attachments
+  ---
+  duration_ms: 0.4119
+  type: 'test'
+  ...
+# Subtest: encrypted message fragments are dropped but readable text, refusal and phase stay intact
+ok 351 - encrypted message fragments are dropped but readable text, refusal and phase stay intact
+  ---
+  duration_ms: 0.2865
+  type: 'test'
+  ...
+# Subtest: resource-bound reasoning is dropped rather than forwarding an invalid reasoning item without its required ID
+ok 352 - resource-bound reasoning is dropped rather than forwarding an invalid reasoning item without its required ID
+  ---
+  duration_ms: 0.2019
+  type: 'test'
+  ...
+# Subtest: unknown history kinds keep their IDs and opaque fields instead of guessing their schema
+ok 353 - unknown history kinds keep their IDs and opaque fields instead of guessing their schema
+  ---
+  duration_ms: 0.1878
+  type: 'test'
+  ...
+# Subtest: an explicit server-side conversation is not detached or cleaned
+ok 354 - an explicit server-side conversation is not detached or cleaned
+  ---
+  duration_ms: 0.1797
+  type: 'test'
+  ...
+# Subtest: string input can detach an old response while literal IDs in its text remain unchanged
+ok 355 - string input can detach an old response while literal IDs in its text remain unchanged
+  ---
+  duration_ms: 0.1832
+  type: 'test'
+  ...
+# Subtest: a request with nothing to repair keeps its exact original bytes and store value
+ok 356 - a request with nothing to repair keeps its exact original bytes and store value
+  ---
+  duration_ms: 0.1461
+  type: 'test'
+  ...
+# Subtest: repaired request preparation is idempotent
+ok 357 - repaired request preparation is idempotent
+  ---
+  duration_ms: 0.2703
+  type: 'test'
+  ...
+# Subtest: empty repaired input is rejected locally without sending or retrying: compaction
+ok 358 - empty repaired input is rejected locally without sending or retrying: compaction
+  ---
+  duration_ms: 5.1229
+  type: 'test'
+  ...
+# Subtest: empty repaired input is rejected locally without sending or retrying: item_reference
+ok 359 - empty repaired input is rejected locally without sending or retrying: item_reference
+  ---
+  duration_ms: 1.9546
+  type: 'test'
+  ...
+# Subtest: empty repaired input is rejected locally without sending or retrying: reasoning
+ok 360 - empty repaired input is rejected locally without sending or retrying: reasoning
+  ---
+  duration_ms: 1.8564
+  type: 'test'
+  ...
+# Subtest: empty repaired input is rejected locally without sending or retrying: message
+ok 361 - empty repaired input is rejected locally without sending or retrying: message
+  ---
+  duration_ms: 1.4986
+  type: 'test'
+  ...
+# Subtest: empty repaired input is rejected locally without sending or retrying: message
+ok 362 - empty repaired input is rejected locally without sending or retrying: message
+  ---
+  duration_ms: 1.5558
+  type: 'test'
+  ...
+# Subtest: empty repaired input is rejected locally without sending or retrying: message
+ok 363 - empty repaired input is rejected locally without sending or retrying: message
+  ---
+  duration_ms: 1.1674
+  type: 'test'
+  ...
+# Subtest: a missing model key is rejected before attempting even explicitly enabled cleanup
+ok 364 - a missing model key is rejected before attempting even explicitly enabled cleanup
+  ---
+  duration_ms: 1.1533
+  type: 'test'
+  ...
+# Subtest: cleanup preserves abort handling when only the new request transformation is enabled
+ok 365 - cleanup preserves abort handling when only the new request transformation is enabled
+  ---
+  duration_ms: 26.3659
+  type: 'test'
+  ...
+# Subtest: cleanup retains the two-second Request inspection deadline
+ok 366 - cleanup retains the two-second Request inspection deadline
+  ---
+  duration_ms: 2014.9995
+  type: 'test'
+  ...
+# Subtest: tool data and associations cannot be silently discarded: function_call
+ok 367 - tool data and associations cannot be silently discarded: function_call
+  ---
+  duration_ms: 1.5512
+  type: 'test'
+  ...
+# Subtest: tool data and associations cannot be silently discarded: function_call_output
+ok 368 - tool data and associations cannot be silently discarded: function_call_output
+  ---
+  duration_ms: 1.3058
+  type: 'test'
+  ...
+# Subtest: tool data and associations cannot be silently discarded: function_call
+ok 369 - tool data and associations cannot be silently discarded: function_call
+  ---
+  duration_ms: 1.15
+  type: 'test'
+  ...
+# Subtest: tool data and associations cannot be silently discarded: function_call_output
+ok 370 - tool data and associations cannot be silently discarded: function_call_output
+  ---
+  duration_ms: 1.0331
+  type: 'test'
+  ...
+# Subtest: tool data and associations cannot be silently discarded: function_call
+ok 371 - tool data and associations cannot be silently discarded: function_call
+  ---
+  duration_ms: 1.1617
+  type: 'test'
+  ...
+# Subtest: tool data and associations cannot be silently discarded: function_call_output
+ok 372 - tool data and associations cannot be silently discarded: function_call_output
+  ---
+  duration_ms: 1.3236
+  type: 'test'
+  ...
+# Subtest: tool data and associations cannot be silently discarded: custom_tool_call
+ok 373 - tool data and associations cannot be silently discarded: custom_tool_call
+  ---
+  duration_ms: 1.274
+  type: 'test'
+  ...
+# Subtest: tool data and associations cannot be silently discarded: custom_tool_call_output
+ok 374 - tool data and associations cannot be silently discarded: custom_tool_call_output
+  ---
+  duration_ms: 1.4481
+  type: 'test'
+  ...
+# Subtest: resource rejection after cleanup still produces just one upstream request
+ok 375 - resource rejection after cleanup still produces just one upstream request
+  ---
+  duration_ms: 3.971
+  type: 'test'
+  ...
+# Subtest: cleanup does not change other endpoints: /v1/responses/compact
+ok 376 - cleanup does not change other endpoints: /v1/responses/compact
+  ---
+  duration_ms: 0.2388
+  type: 'test'
+  ...
+# Subtest: cleanup does not change other endpoints: /v1/chat/completions
+ok 377 - cleanup does not change other endpoints: /v1/chat/completions
+  ---
+  duration_ms: 0.0629
+  type: 'test'
+  ...
+# Subtest: cleanup does not change other endpoints: /v1/models
+ok 378 - cleanup does not change other endpoints: /v1/models
+  ---
+  duration_ms: 0.0552
+  type: 'test'
+  ...
+# Subtest: unsupported bodies remain byte-identical with cleanup enabled: "GET"
+ok 379 - unsupported bodies remain byte-identical with cleanup enabled: "GET"
+  ---
+  duration_ms: 0.2109
+  type: 'test'
+  ...
+# Subtest: unsupported bodies remain byte-identical with cleanup enabled: "POST"
+ok 380 - unsupported bodies remain byte-identical with cleanup enabled: "POST"
+  ---
+  duration_ms: 0.1239
+  type: 'test'
+  ...
+# Subtest: unsupported bodies remain byte-identical with cleanup enabled: {"content-type":"text/plain"}
+ok 381 - unsupported bodies remain byte-identical with cleanup enabled: {"content-type":"text/plain"}
+  ---
+  duration_ms: 0.0855
+  type: 'test'
+  ...
+# Subtest: unsupported bodies remain byte-identical with cleanup enabled: {"content-encoding":"gzip"}
+ok 382 - unsupported bodies remain byte-identical with cleanup enabled: {"content-encoding":"gzip"}
+  ---
+  duration_ms: 0.0646
+  type: 'test'
+  ...
+# Subtest: unsupported bodies remain byte-identical with cleanup enabled: "POST"
+ok 383 - unsupported bodies remain byte-identical with cleanup enabled: "POST"
+  ---
+  duration_ms: 0.0784
+  type: 'test'
+  ...
+# Subtest: cleanup retains the existing four MiB UTF-8 inspection bound
+ok 384 - cleanup retains the existing four MiB UTF-8 inspection bound
+  ---
+  duration_ms: 5.5575
+  type: 'test'
+  ...
+# Subtest: cleanup and portable replay stay independently configurable through the provider loader
+ok 385 - cleanup and portable replay stay independently configurable through the provider loader
+  ---
+  duration_ms: 3.2163
+  type: 'test'
+  ...
+# Subtest: password login reads status first, carries WAF cookies and sends no model authorization
+ok 386 - password login reads status first, carries WAF cookies and sends no model authorization
+  ---
+  duration_ms: 39.5191
+  type: 'test'
+  ...
+# Subtest: WAF on the first site request bootstraps /login and retries with anonymous cookies
+ok 387 - WAF on the first site request bootstraps /login and retries with anonymous cookies
+  ---
+  duration_ms: 5.1116
+  type: 'test'
+  ...
+# Subtest: WAF on a password login POST is observable and the authentication POST is never replayed
+ok 388 - WAF on a password login POST is observable and the authentication POST is never replayed
+  ---
+  duration_ms: 1.6499
+  type: 'test'
+  ...
+# Subtest: the known local 40-hex solver computes acw_sc__v2 and retries a GET once
+ok 389 - the known local 40-hex solver computes acw_sc__v2 and retries a GET once
+  ---
+  duration_ms: 1.5747
+  type: 'test'
+  ...
+# Subtest: Turnstile-enabled status stops before password login
+ok 390 - Turnstile-enabled status stops before password login
+  ---
+  duration_ms: 1.4809
+  type: 'test'
+  ...
+# Subtest: account reads are read-only and reject another user's data
+ok 391 - account reads are read-only and reject another user's data
+  ---
+  duration_ms: 1.2745
+  type: 'test'
+  ...
+# Subtest: profile acquisition enriches verified identity and retains rotated WAF/session cookies
+ok 392 - profile acquisition enriches verified identity and retains rotated WAF/session cookies
+  ---
+  duration_ms: 1.4695
+  type: 'test'
+  ...
+# Subtest: wrong-user profile is not a session update
+ok 393 - wrong-user profile is not a session update
+  ---
+  duration_ms: 1.0675
+  type: 'test'
+  ...
+# Subtest: site errors are classified without exposing supplied credentials
+    # Subtest: captcha
+    ok 1 - captcha
+      ---
+      duration_ms: 1.004
+      type: 'test'
+      ...
+    # Subtest: credentials
+    ok 2 - credentials
+      ---
+      duration_ms: 0.9828
+      type: 'test'
+      ...
+    # Subtest: waf
+    ok 3 - waf
+      ---
+      duration_ms: 0.7493
+      type: 'test'
+      ...
+    # Subtest: inactive
+    ok 4 - inactive
+      ---
+      duration_ms: 0.9638
+      type: 'test'
+      ...
+    # Subtest: unavailable
+    ok 5 - unavailable
+      ---
+      duration_ms: 1.0261
+      type: 'test'
+      ...
+    # Subtest: rate-limit
+    ok 6 - rate-limit
+      ---
+      duration_ms: 1.0715
+      type: 'test'
+      ...
+    1..6
+ok 394 - site errors are classified without exposing supplied credentials
+  ---
+  duration_ms: 6.6846
+  type: 'test'
+  ...
+# Subtest: Tengine rate limiting, custom denial and security-level WAF are classified apart
+ok 395 - Tengine rate limiting, custom denial and security-level WAF are classified apart
+  ---
+  duration_ms: 2.0136
+  type: 'test'
+  ...
+# Subtest: API key selection reads existing active keys without creating or rotating credentials
+ok 396 - API key selection reads existing active keys without creating or rotating credentials
+  ---
+  duration_ms: 1.3486
+  type: 'test'
+  ...
+# Subtest: ambiguous, truncated, expired, exhausted and masked keys cannot silently win selection
+    # Subtest: ambiguous
+    ok 1 - ambiguous
+      ---
+      duration_ms: 0.6336
+      type: 'test'
+      ...
+    # Subtest: truncated
+    ok 2 - truncated
+      ---
+      duration_ms: 0.4615
+      type: 'test'
+      ...
+    # Subtest: expired
+    ok 3 - expired
+      ---
+      duration_ms: 0.38
+      type: 'test'
+      ...
+    # Subtest: exhausted
+    ok 4 - exhausted
+      ---
+      duration_ms: 0.4088
+      type: 'test'
+      ...
+    # Subtest: masked
+    ok 5 - masked
+      ---
+      duration_ms: 0.3437
+      type: 'test'
+      ...
+    1..5
+ok 397 - ambiguous, truncated, expired, exhausted and masked keys cannot silently win selection
+  ---
+  duration_ms: 2.7565
+  type: 'test'
+  ...
+# Subtest: sign_in sends only the site session and New-API-User with an empty JSON body
+ok 398 - sign_in sends only the site session and New-API-User with an empty JSON body
+  ---
+  duration_ms: 1.3151
+  type: 'test'
+  ...
+# Subtest: sign_in results distinguish claimed, done, captcha, inactive and reward credit
+ok 399 - sign_in results distinguish claimed, done, captcha, inactive and reward credit
+  ---
+  duration_ms: 3.4233
+  type: 'test'
+  ...
+# Subtest: sign_in HTTP and WAF failures retain a non-retryable classification
+ok 400 - sign_in HTTP and WAF failures retain a non-retryable classification
+  ---
+  duration_ms: 3.3857
+  type: 'test'
+  ...
+# Subtest: a WAF challenge on the sign_in POST is never replayed
+ok 401 - a WAF challenge on the sign_in POST is never replayed
+  ---
+  duration_ms: 1.1619
+  type: 'test'
+  ...
+# Subtest: session handoff accepts AnyRouter cURL and WAF cookies but rejects other sites and unsafe input
+ok 402 - session handoff accepts AnyRouter cURL and WAF cookies but rejects other sites and unsafe input
+  ---
+  duration_ms: 3.4222
+  type: 'test'
+  ...
+# Subtest: site operations reject API-only and unknown origins but accept the one API base
+ok 403 - site operations reject API-only and unknown origins but accept the one API base
+  ---
+  duration_ms: 0.7999
+  type: 'test'
+  ...
+# Subtest: session import fails closed when the selected site returns another UID
+ok 404 - session import fails closed when the selected site returns another UID
+  ---
+  duration_ms: 0.6734
+  type: 'test'
+  ...
+# Subtest: cookie merging handles Expires commas, WAF rotation and scoped deletion
+ok 405 - cookie merging handles Expires commas, WAF rotation and scoped deletion
+  ---
+  duration_ms: 1.0303
+  type: 'test'
+  ...
+# Subtest: missing or malformed quota values are not zero
+ok 406 - missing or malformed quota values are not zero
+  ---
+  duration_ms: 0.1507
+  type: 'test'
+  ...
+# Subtest: account custom headers override native defaults but cannot leak account credentials
+ok 407 - account custom headers override native defaults but cannot leak account credentials
+  ---
+  duration_ms: 1.0725
+  type: 'test'
+  ...
+# Subtest: Anthropic inference headers restore the Claude Code client identity
+ok 408 - Anthropic inference headers restore the Claude Code client identity
+  ---
+  duration_ms: 0.1702
+  type: 'test'
+  ...
+# Subtest: site requests use browser headers and site-only overrides
+ok 409 - site requests use browser headers and site-only overrides
+  ---
+  duration_ms: 1.1982
+  type: 'test'
+  ...
+# Subtest: session handoff accepts Chrome's `curl --url` output shape
+ok 410 - session handoff accepts Chrome's `curl --url` output shape
+  ---
+  duration_ms: 0.5355
+  type: 'test'
+  ...
+# Subtest: usage reads user balance, used_quota and the today stat window
+ok 411 - usage reads user balance, used_quota and the today stat window
+  ---
+  duration_ms: 35.7749
+  type: 'test'
+  ...
+# Subtest: stat blocked by http_security_level_rule falls back to complete consume-log pagination
+ok 412 - stat blocked by http_security_level_rule falls back to complete consume-log pagination
+  ---
+  duration_ms: 5.8405
+  type: 'test'
+  ...
+# Subtest: inconsistent pagination totals become unknown rather than a partial or zero total
+ok 413 - inconsistent pagination totals become unknown rather than a partial or zero total
+  ---
+  duration_ms: 3.4264
+  type: 'test'
+  ...
+# Subtest: incomplete and malformed log pages never fabricate a total
+    # Subtest: empty data object
+    ok 1 - empty data object
+      ---
+      duration_ms: 2.5352
+      type: 'test'
+      ...
+    # Subtest: empty page before expected total
+    ok 2 - empty page before expected total
+      ---
+      duration_ms: 2.3623
+      type: 'test'
+      ...
+    # Subtest: non-numeric quota
+    ok 3 - non-numeric quota
+      ---
+      duration_ms: 2.2263
+      type: 'test'
+      ...
+    # Subtest: created_at outside today
+    ok 4 - created_at outside today
+      ---
+      duration_ms: 2.4196
+      type: 'test'
+      ...
+    1..4
+ok 414 - incomplete and malformed log pages never fabricate a total
+  ---
+  duration_ms: 10.3725
+  type: 'test'
+  ...
+# Subtest: explicit zero from stat or an empty log page is a real zero
+ok 415 - explicit zero from stat or an empty log page is a real zero
+  ---
+  duration_ms: 3.9107
+  type: 'test'
+  ...
+# Subtest: Beijing day boundary is UTC 16:00 and survives year and leap-day changes
+ok 416 - Beijing day boundary is UTC 16:00 and survives year and leap-day changes
+  ---
+  duration_ms: 0.2354
+  type: 'test'
+  ...
+# Subtest: formatUSD preserves one-quota precision and negative values
+ok 417 - formatUSD preserves one-quota precision and negative values
+  ---
+  duration_ms: 0.1006
+  type: 'test'
+  ...
+# Subtest: negative quota from the user endpoint formats without becoming zero
+ok 418 - negative quota from the user endpoint formats without becoming zero
+  ---
+  duration_ms: 3.3395
+  type: 'test'
+  ...
+# Subtest: api-key-only billing usage fallback uses the injected fetch implementation
+ok 419 - api-key-only billing usage fallback uses the injected fetch implementation
+  ---
+  duration_ms: 1.6751
+  type: 'test'
+  ...
+# Subtest: usage failures preserve login status and never fabricate a zero balance
+ok 420 - usage failures preserve login status and never fabricate a zero balance
+  ---
+  duration_ms: 1.7111
+  type: 'test'
+  ...
+# Subtest: provider-level api-key usage forwards the injected fetch implementation
+ok 421 - provider-level api-key usage forwards the injected fetch implementation
+  ---
+  duration_ms: 0.6967
+  type: 'test'
+  ...
+1..421
+# tests 445
+# suites 0
+# pass 442
+# fail 0
+# cancelled 0
+# skipped 3
+# todo 0
+# duration_ms 13251.2186

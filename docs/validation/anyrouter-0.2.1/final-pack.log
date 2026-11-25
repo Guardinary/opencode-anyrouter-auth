@@ -1,0 +1,2 @@
+$ node scripts/pack-fixture.mjs
+{"package":"opencode-anyrouter-auth","version":"0.2.1","publishedFiles":28,"privateSentinelExcluded":true,"actualArchiveImported":true,"borrowedInstalledDependencies":{"tough-cookie":"6.1.0","tldts":"7.5.5","tldts-core":"7.5.5"}}
