@@ -23,7 +23,7 @@ test("config declarations have host-supported provider and modality fields, neve
   const models = declaredConfigModels();
   assert.deepEqual(Object.keys(models), DECLARED_MODEL_IDS);
   for (const row of Object.values(models)) {
-    assert.equal(row.provider.api, baseURL);
+    assert.equal(row.provider.api, row.provider.npm === "@ai-sdk/google" ? `${origin}/v1beta` : baseURL);
     assert.equal(typeof row.reasoning, "boolean");
     assert.equal(typeof row.attachment, "boolean");
     assert.equal(typeof row.tool_call, "boolean");

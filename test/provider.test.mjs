@@ -130,7 +130,7 @@ test("provider defaults to the AnyRouter Anthropic base with 16 declared models 
   assert.equal(provider.models["claude-opus-4-6"].api, undefined, "Claude inherits the provider's Anthropic SDK");
   assert.equal(provider.models["gpt-6-astra-cc-format"].api, undefined, "cc-format speaks Anthropic Messages");
   assert.deepEqual(provider.models["gpt-5-codex"].provider, { npm: "@ai-sdk/openai", api: "https://anyrouter.top/v1" });
-  assert.deepEqual(provider.models["gemini-2.5-pro"].provider, { npm: "@ai-sdk/openai", api: "https://anyrouter.top/v1" });
+  assert.deepEqual(provider.models["gemini-2.5-pro"].provider, { npm: "@ai-sdk/google", api: "https://anyrouter.top/v1beta" });
   assert.deepEqual(provider.models["claude-opus-4-6"].provider, { npm: "@ai-sdk/anthropic", api: "https://anyrouter.top/v1" });
   assert.equal(provider.models["gpt-5-codex"].api, undefined, "config must not contain runtime API objects");
   assert.equal(provider.models["gpt-5-codex"].capabilities, undefined, "config must use top-level capabilities/modalities");
@@ -370,12 +370,12 @@ test("loader sends the model key per protocol and never forwards site credential
   }
 });
 
-test("loader blocks the unsupported native Gemini path before transmitting any key", async () => {
+test("loader blocks unknown Gemini actions before transmitting any key", async () => {
   let calls = 0;
   const hooks = await createProvider({}, {}, { fetchImpl: async () => { calls++; return Response.json({}); } });
   const auth = stored();
   const loaded = await hooks.auth.loader(async () => auth);
-  const result = await loaded.fetch("https://anyrouter.top/v1beta/models/gemini-2.5-pro:generateContent", { method: "POST", body: "{}" });
+  const result = await loaded.fetch("https://anyrouter.top/v1beta/models/gemini-2.5-pro:delete", { method: "POST", body: "{}" });
   assert.equal(result.status, 400);
   assert.equal((await result.json()).error.code, "anyrouter_untrusted_destination");
   assert.equal(calls, 0);

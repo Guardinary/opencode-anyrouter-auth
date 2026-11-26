@@ -4,7 +4,7 @@
 
 Magpie's [plugin documentation](<https://usemagpie.ai/docs/zh/plugins#发布与上架>) supports standalone npm or GitHub packages. For a GitHub plugin, keep the package manifest at repository root and commit the directly loadable entry/runtime files. A `magpie-plugin` repository topic enables the **unofficial GitHub discovery** section; it does not imply official review or recommendation-list acceptance.
 
-This project publishes from [Guardinary/opencode-anyrouter-auth](<https://github.com/Guardinary/opencode-anyrouter-auth>) as a standalone repository, not a GitHub fork. Version 0.2.1 has a tagged GitHub Release with the package tarball and SHA-256 checksum. No same-name upstream npm publication or recommendation-registry PR is part of this release.
+This project publishes from [Guardinary/opencode-anyrouter-auth](<https://github.com/Guardinary/opencode-anyrouter-auth>) as a standalone repository, not a GitHub fork. Each published version has a tagged GitHub Release with the package tarball and SHA-256 checksum; 0.2.2 corrects native Gemini routing. No same-name upstream npm publication or recommendation-registry PR is part of this release.
 
 ## Repository contents
 
@@ -32,7 +32,7 @@ For this repository, the official discovery topic is `magpie-plugin`. Release no
 ## Consumer installation
 
 ```sh
-magpie plugin add github:Guardinary/opencode-anyrouter-auth#v0.2.1
+magpie plugin add github:Guardinary/opencode-anyrouter-auth#v0.2.2
 magpie plugin login anyrouter
 ```
 

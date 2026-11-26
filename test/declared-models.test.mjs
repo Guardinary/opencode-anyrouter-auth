@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { DECLARED_MODEL_IDS, MODEL_SHAPE, declaredModels } from "../lib/declared-models.mjs";
 
-const RESPONSES_MODELS = ["gemini-2.5-pro", "gpt-5-codex", "gpt-6-astra", "gpt-6.1-sol"];
+const RESPONSES_MODELS = ["gpt-5-codex", "gpt-6-astra", "gpt-6.1-sol"];
 const CLAUDE_IDS = DECLARED_MODEL_IDS.filter(id => id.startsWith("claude-"));
 
 test("declaredModels returns the 16 default-group models with complete model shapes", () => {
@@ -24,8 +24,9 @@ test("declaredModels returns the 16 default-group models with complete model sha
   }
 });
 
-test("GPT/Gemini entries use the Responses API; Claude and cc-format inherit Anthropic", () => {
+test("GPT entries use Responses, Gemini uses Google and Claude/cc-format inherit Anthropic", () => {
   const models = declaredModels();
+  assert.deepEqual(models["gemini-2.5-pro"].api, { npm: "@ai-sdk/google", url: "https://anyrouter.top/v1beta" });
 
   for (const id of RESPONSES_MODELS) {
     assert.deepEqual(models[id].api, {

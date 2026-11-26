@@ -26,15 +26,15 @@ test("declared model catalog contains the 16 public AnyRouter models with protoc
   assert.equal(models["claude-opus-4-6"].api, undefined);
   assert.equal(models["gpt-5-codex"].api.npm, "@ai-sdk/openai");
   assert.equal(models["gpt-5-codex"].api.url, "https://anyrouter.top/v1");
-  assert.equal(models["gemini-2.5-pro"].api.npm, "@ai-sdk/openai");
+  assert.equal(models["gemini-2.5-pro"].api.npm, "@ai-sdk/google");
   assert.equal(models["gpt-6-astra-cc-format"].api, undefined);
 });
 
-test("protocol mapping sends Claude to Anthropic Messages and GPT/Gemini to Responses", () => {
+test("protocol mapping sends Claude to Messages, GPT to Responses and Gemini to native Google", () => {
   assert.equal(protocolForModel("claude-opus-4-6"), "anthropic");
   assert.equal(protocolForModel("gpt-6-astra-cc-format"), "anthropic");
   assert.equal(protocolForModel("gpt-5-codex"), "responses");
-  assert.equal(protocolForModel("gemini-2.5-pro"), "responses");
+  assert.equal(protocolForModel("gemini-2.5-pro"), "gemini");
   assert.equal(protocolForModel("unknown-model"), "responses");
 });
 
@@ -47,12 +47,12 @@ test("buildCatalog applies declared models, protocol SDKs and the single AnyRout
   });
   assert.equal(Object.keys(out).length, 16);
   for (const model of Object.values(out)) {
-    assert.equal(model.api.url, "https://anyrouter.top/v1");
+    assert.equal(model.api.url, model.api.npm === "@ai-sdk/google" ? "https://anyrouter.top/v1beta" : "https://anyrouter.top/v1");
   }
   assert.equal(out["claude-opus-4-6"].api.npm, "@ai-sdk/anthropic");
   assert.equal(out["claude-3-5-haiku-20241022"].api.npm, "@ai-sdk/anthropic");
   assert.equal(out["gpt-5-codex"].api.npm, "@ai-sdk/openai");
-  assert.equal(out["gemini-2.5-pro"].api.npm, "@ai-sdk/openai");
+  assert.equal(out["gemini-2.5-pro"].api.npm, "@ai-sdk/google");
   assert.equal(out["gpt-6-astra-cc-format"].api.npm, "@ai-sdk/anthropic");
 });
 

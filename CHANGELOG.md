@@ -2,6 +2,14 @@
 
 本文件记录 `opencode-anyrouter-auth` 的版本变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [0.2.2] — 2026-11-26（Gemini 原生协议修复）
+
+- 修复 Gemini 被误分派到 Responses 的 404：默认使用 `@ai-sdk/google` 和官方 `/v1beta`，保留用户 SDK 及已识别端点元数据优先级。
+- 放行精确的 `generateContent`／`streamGenerateContent` 原生路径，使用所选账号的 Google Key，清除 URL query Key，保留签名正文；仍拒绝外域、未知动作和凭据重定向，不重试或换协议重放。
+- 配置／运行时／预览／失败兜底的 Gemini SDK 和 base 一致；模型发现仍读取 `/v1/models`。新增模型、loader 和隔离真实 Magpie 宿主回归。
+- 用户授权的最小真实验证：`gemini-4-neon` 经修复 loader 返回 200 SSE 和 `STOP`；carbon 原生接口报告负载上限，2.5-pro 原生接口仍 404。后两项不宣称线上可用；不修改账号配置或轮换 Key。
+- 升级后重新获取模型；手工固定旧 Responses SDK 的模型需恢复默认或切换 Google。无需重新登录。
+
 ## [0.2.1] — 2026-11-25（GitHub Release；不发布同名 npm 包）
 
 独立发布仓库为 `Guardinary/opencode-anyrouter-auth`，根目录包含可直接加载的源码入口。`magpie-plugin` topic 用于非官方 GitHub 发现，不代表官方推荐列表收录；2026-11-24 的加固验收记录保留为历史证据。

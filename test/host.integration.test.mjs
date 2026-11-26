@@ -154,10 +154,15 @@ test("installed host RPC: authoritative account models, config/runtime SDKs, fal
     { id: "gpt-future", reasoning: true, modalities: { input: ["text", "image"], output: ["text"] }, context_length: 10000, max_output_tokens: 1000 },
     { id: "claude-future", reasoning: true, supported_endpoint_types: ["anthropic"] },
     { id: "gpt-override", reasoning: true }, { id: "disabled" },
+    { id: "gemini-4-carbon" }, { id: "gemini-4-neon" },
   ];
   await rpc("import", { provider: "anyrouter", key: "anyrouter", auth: { type: "api", key: apiKey } });
   const success = await providerRow(host), byId = Object.fromEntries(success.models.map(row => [row.id, row]));
-  assert.deepEqual(Object.keys(byId), ["gpt-6.1-sol", "claude-opus-4-6", "claude-3-5-haiku-20241022", "gpt-future", "claude-future", "friendly"]);
+  assert.deepEqual(Object.keys(byId), ["gpt-6.1-sol", "claude-opus-4-6", "claude-3-5-haiku-20241022", "gpt-future", "claude-future", "friendly", "gemini-4-carbon", "gemini-4-neon"]);
+  for (const id of ["gemini-4-carbon", "gemini-4-neon"]) {
+    assert.equal(byId[id].npm, "@ai-sdk/google");
+    assert.equal(byId[id].url, "https://anyrouter.top/v1beta");
+  }
   assert.equal(success.fellBack, false);
   assert.equal(byId["gpt-future"].npm, "@ai-sdk/openai");
   assert.equal(byId["gpt-future"].reasoning, true);
@@ -210,7 +215,21 @@ test("installed host RPC: authoritative account models, config/runtime SDKs, fal
     assert.equal(Boolean(JSON.parse(sent.body).client_metadata), codex);
     assert.equal(Boolean(sent.headers.originator), codex);
   }
-  t.diagnostic("Real host normalization: declared/undeclared SDKs and capabilities, aliases, disabled/manual IDs, successful empty lists, WAF fallback and four switch combinations verified.");
+  for (const action of ["generateContent", "streamGenerateContent"]) {
+    const body = { contents: [{ role: "user", parts: [{ text: "synthetic", thoughtSignature: "retain-synthetic-signature" }] }], generationConfig: { maxOutputTokens: 16 } };
+    const before = fixture.requests.length;
+    const result = await modelFetch(host, "gemini-4-neon", "@ai-sdk/google", `https://anyrouter.top/v1beta/models/gemini-4-neon:${action}?alt=sse`, body);
+    assert.equal(head(result).status, 200);
+    assert.match(responseBody(result.events), /safe-gemini-result/);
+    assert.equal(fixture.requests.length - before, 1);
+    const sent = fixture.requests.at(-1);
+    assert.equal(sent.path, `/v1beta/models/gemini-4-neon:${action}`);
+    assert.equal(sent.headers["x-goog-api-key"], apiKey);
+    assert.equal(sent.headers.authorization, undefined);
+    assert.equal(sent.headers.cookie, undefined);
+    assert.deepEqual(JSON.parse(sent.body), body);
+  }
+  t.diagnostic("Real host normalization: native Gemini model SDK/base and signed contents, authoritative model lists and four compatibility switch combinations verified.");
 }, { provider: { anyrouter: { npm: "@ai-sdk/anthropic", api: "https://anyrouter.top/v1", models: {
   friendly: { id: "gpt-override", provider: { npm: "@ai-sdk/openai-compatible", api: "https://anyrouter.top/v1" }, reasoning: false, attachment: false, tool_call: false, modalities: { input: ["text"], output: ["text"] } },
   disabled: { disabled: true }, manual: { provider: { npm: "@ai-sdk/openai" } },

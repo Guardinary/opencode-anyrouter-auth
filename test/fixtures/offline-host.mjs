@@ -104,6 +104,16 @@ export async function openOfflineFixture(bun) {
         res.writeHead(200, { "content-type": "text/event-stream" });
         return res.end(frame({ type: "response.completed", response: { status: "completed", output: [{ type: "message", content: [{ type: "output_text", text: "safe-result" }] }] } }));
       }
+      if (/^\/v1beta\/models\/gemini-[A-Za-z0-9._-]+:(?:streamGenerateContent|generateContent)$/.test(url.pathname)) {
+        if (req.headers["x-goog-api-key"] !== apiKey || req.headers.authorization || req.headers.cookie || req.headers["new-api-user"]) {
+          return send({ error: { code: 401, status: "UNAUTHENTICATED", message: "Wrong native model credential boundary" } }, 401);
+        }
+        const value = { candidates: [{ content: { role: "model", parts: [{ text: "safe-gemini-result" }] }, finishReason: "STOP" }], usageMetadata: { totalTokenCount: 4 } };
+        if (url.pathname.endsWith(":streamGenerateContent")) {
+          res.writeHead(200, { "content-type": "text/event-stream" }); return res.end(frame(value));
+        }
+        return send(value);
+      }
       if (url.pathname === "/v1/messages") {
         res.writeHead(200, { "content-type": "text/event-stream" });
         return res.end(frame({ type: "content_block_start", index: 0, content_block: { type: "text", text: "safe-claude-result" } }, "content_block_start") + frame({ type: "message_stop" }, "message_stop"));

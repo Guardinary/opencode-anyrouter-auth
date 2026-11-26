@@ -26,14 +26,14 @@
 
 ## 当前实现相对旧快照的变化
 
-| 边界 | 0.2.1 行为 |
+| 边界 | 当前行为 |
 | --- | --- |
 | WAF | 不执行 HTML／JS；只计算唯一已知 40-hex arg1；GET 最多一次重试，所有 POST不重放 |
 | Cookie | tough-cookie 域／路径／前缀／删除／绝对期限；versioned jar，损坏新状态不回退旧 Cookie |
 | 账号 | 保留 schema 2；新登录 generation、UID 队列和凭据快照；最新宿主字段补丁，不冒充跨进程 CAS |
 | Key | 模型 Key／系统令牌分离；明确已有 Key ID，只读目标；歧义可保留为余额专用账号 |
 | 模型 | config/runtime 显式转换；成功账号列表权威，空列表也是权威；无 Key 零模型；保守自身兜底 |
-| 协议 | Claude／cc-format 默认 Messages，GPT／Gemini 默认 Responses；客户端开关独立；未知／签名历史保留 |
+| 协议 | Claude／cc-format 默认 Messages，GPT/Codex 默认 Responses；0.2.2 起 Gemini 默认原生 Google `/v1beta`，neon 实测成功；客户端开关独立，未知／签名历史保留 |
 | 诊断 | 有界空前导证明、部分／不透明内容原字节回放；生成诊断脱敏，不承诺原始输出 DLP |
 | 金额 | 同一换算率用于文本和数值，单 quota 非零；非常规率 18 位截断；不完整／重复日志不估算 |
 | 验证 | 合成离线 Node／Bun 回归，真实 Magpie 宿主和 CLI 使用自有存储与 loopback fence |

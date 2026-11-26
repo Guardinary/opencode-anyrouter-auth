@@ -65,7 +65,8 @@ Only installed runtimes are used for the last command. Windows child-process var
 - Config uses `model.provider.{npm,api}`, top-level reasoning/attachment/tool_call/modalities. Runtime uses `model.api.{id,npm,url}` and capabilities.
 - Successful account lists, including empty lists, are authoritative. Public registry/pricing and manual-only IDs never grant account access.
 - Keyless account returns zero models and sends no model request. Preview/failure fallback comes from plugin declarations and explicit settings, not arbitrary host catalog union.
-- Claude/cc-format defaults to Messages; GPT/Gemini to Responses. Explicit model SDK may override but does not prove upstream support.
+- Claude/cc-format defaults to Messages; GPT/Codex to Responses; Gemini defaults to native Google (`@ai-sdk/google`, official `/v1beta`). `generateContent` and `streamGenerateContent` are the only newly allowed native actions. Model discovery remains `/v1/models`. Explicit model SDK/recognized endpoint metadata overrides family defaults; it does not prove upstream availability.
+- Native Gemini sends only the account `x-goog-api-key`, never a gateway `key` query parameter or site credentials. Signed contents are not normalized as Codex input; redirects are blocked and each loader fetch sends at most one upstream request.
 - Claude and Codex switches are independent. Keep unknown/signed/opaque input items intact; never invent reasoning effort.
 - Lossy repair is explicitly off by default. Detached tool results require an earlier retained call of the same kind/ID; otherwise fail before fetch.
 
