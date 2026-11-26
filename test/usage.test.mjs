@@ -44,7 +44,7 @@ function harness(steps) {
 async function runUsage(steps, { now = Date.now, extra = {} } = {}) {
   const h = harness(steps);
   let auth = stored(extra);
-  const hooks = await createProvider({ client: { auth: { set: async ({ body }) => { auth = body; } } } }, {}, { fetchImpl: h.fetchImpl, now: typeof now === "function" ? now : () => now });
+  const hooks = await createProvider({ magpie: { option: (_provider, key) => key === "site-today-spend" ? true : undefined }, client: { auth: { set: async ({ body }) => { auth = body; } } } }, {}, { fetchImpl: h.fetchImpl, now: typeof now === "function" ? now : () => now });
   return { hooks, h, usage: await hooks.auth.usage(async () => auth, {}) };
 }
 

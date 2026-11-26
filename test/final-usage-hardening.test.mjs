@@ -39,7 +39,7 @@ for (const rate of [1000000000001, Number.MAX_SAFE_INTEGER]) {
 test("one alternate conversion rate governs balance, numeric wallet, total and today's single quota", async () => {
   let auth = saveAccount(account);
   const steps = [profile(), json({ quota: 1 })];
-  const hooks = await createProvider({ client: { auth: { set: async ({ body }) => { auth = body; } } } }, { quotaPerUnit: 1000000 }, {
+  const hooks = await createProvider({ magpie: { option: (_provider, key) => key === "site-today-spend" ? true : undefined }, client: { auth: { set: async ({ body }) => { auth = body; } } } }, { quotaPerUnit: 1000000 }, {
     now: () => now, fetchImpl: async () => { assert.ok(steps.length); return steps.shift(); },
   });
   const result = await hooks.auth.usage(async () => auth);

@@ -20,7 +20,7 @@ function deferred() {
 async function harness(steps, { extra = {}, now = Date.now, saveError = false } = {}) {
   let auth = saveAccount(account(extra), {}, now());
   const calls = [], writes = [];
-  const hooks = await createProvider({ client: { auth: { set: async ({ body }) => {
+  const hooks = await createProvider({ magpie: { option: (_provider, key) => key === "site-today-spend" ? true : undefined }, client: { auth: { set: async ({ body }) => {
     writes.push(body);
     if (saveError) throw new Error("synthetic storage failure");
     auth = body;

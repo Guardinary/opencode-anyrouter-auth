@@ -97,7 +97,13 @@ test("installed host RPC: login prompts, jar persistence, rotation/check-in, mis
 
   saved.anyrouter = { ...account, metadata: { hostOwned: true }, hostExtension: "preserve" };
   await writeFile(fixture.authPath, JSON.stringify(saved));
+  const beforeDefaultUsage = fixture.requests.length;
+  const balanceOnly = await rpc("usage", { provider: "anyrouter", account: "anyrouter", proxy: "direct" });
+  assert.deepEqual(balanceOnly.result.windows.map(window => window.name), ["累计消耗", "余额"]);
+  assert.equal(fixture.requests.length - beforeDefaultUsage, 1);
+  assert.equal(balanceOnly.result.balance, "$24.691356");
   fixture.state.selfRotation = true;
+  await rpc("setProviderOptions", { options: { anyrouter: { "site-today-spend": true } } });
   const usage = await rpc("usage", { provider: "anyrouter", account: "anyrouter", proxy: "direct" });
   assert.equal(usage.result.error, "");
   assert.equal(usage.result.signIn, "kept");

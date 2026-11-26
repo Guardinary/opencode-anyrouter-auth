@@ -145,9 +145,10 @@ test("an existing provider configuration is preserved, not overwritten", async (
   assert.deepEqual(Object.keys(cfg.provider).sort(), ["anyrouter", "other"]);
 });
 
-test("the plugin exposes the six provider options and no legacy retry filter switch", async () => {
+test("the plugin exposes the daily-spend toggle and six existing options without a legacy retry filter switch", async () => {
   const hooks = await createProvider();
   assert.deepEqual(hooks.auth.options.map(option => option.key), [
+    "site-today-spend",
     "send-codex-headers",
     "claude-code-compat",
     "portable-responses",
@@ -452,6 +453,7 @@ test("the published plugin entry builds the same provider without an internal re
   assert.equal(hooks.auth.provider, "anyrouter");
   assert.equal(hooks.auth.methods.length, 6);
   assert.deepEqual(hooks.auth.options.map(option => option.key), [
+    "site-today-spend",
     "send-codex-headers",
     "claude-code-compat",
     "portable-responses",
