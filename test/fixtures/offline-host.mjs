@@ -43,7 +43,7 @@ export async function openOfflineFixture(bun) {
   const state = { listMode: "success", rows: [
     { id: "fixture-responses", supported_endpoint_types: ["responses"], context_length: 10000 },
     { id: "fixture-messages", supported_endpoint_types: ["anthropic"], context_length: 10000 },
-  ], tokens: [], cookie: "s123", selfRotation: false, expiredSession: false };
+  ], prices: [], groupRatios: { default: 1 }, tokens: [], cookie: "s123", selfRotation: false, expiredSession: false };
   const server = http.createServer(async (req, res) => {
     try {
       const url = new URL(req.url, "http://127.0.0.1");
@@ -90,7 +90,7 @@ export async function openOfflineFixture(bun) {
         return selected ? send({ success: true, data: state.tokens.find(item => String(item.id) === selected[1]) ?? {} }) :
           send({ success: true, data: { items: state.tokens, total: state.tokens.length } });
       }
-      if (url.pathname === "/api/pricing") return send({ success: true, data: [] });
+      if (url.pathname === "/api/pricing") return send({ success: true, data: state.prices, group_ratio: state.groupRatios });
       if (url.pathname === "/v1/models") {
         if (!req.headers.authorization?.startsWith("Bearer ")) return send({ error: { code: "invalid_api_key" } }, 401);
         if (state.listMode === "waf") {

@@ -156,6 +156,11 @@ test("installed host RPC: authoritative account models, config/runtime SDKs, fal
     { id: "gpt-override", reasoning: true }, { id: "disabled" },
     { id: "gemini-4-carbon" }, { id: "gemini-4-neon" },
   ];
+  fixture.state.prices = [
+    { model_name: "gemini-4-neon", quota_type: 0, model_ratio: 1, completion_ratio: 5, enable_groups: ["default"] },
+    { model_name: "gemini-4-carbon", quota_type: 0, model_ratio: 2, completion_ratio: 5, enable_groups: ["default"] },
+    { model_name: "not-accessible", quota_type: 0, model_ratio: 1, completion_ratio: 5, enable_groups: ["default"] },
+  ];
   await rpc("import", { provider: "anyrouter", key: "anyrouter", auth: { type: "api", key: apiKey } });
   const success = await providerRow(host), byId = Object.fromEntries(success.models.map(row => [row.id, row]));
   assert.deepEqual(Object.keys(byId), ["gpt-6.1-sol", "claude-opus-4-6", "claude-3-5-haiku-20241022", "gpt-future", "claude-future", "friendly", "gemini-4-carbon", "gemini-4-neon"]);
@@ -164,6 +169,15 @@ test("installed host RPC: authoritative account models, config/runtime SDKs, fal
     assert.equal(byId[id].url, "https://anyrouter.top/v1beta");
   }
   assert.equal(success.fellBack, false);
+  assert.deepEqual(byId["gemini-4-neon"].cost, { input: 2, output: 10 });
+  assert.deepEqual(byId["gemini-4-carbon"].cost, { input: 4, output: 20 });
+  assert.equal(byId["gpt-future"].cost, undefined);
+  assert.deepEqual(byId.friendly.cost, { input: 0, output: 3 });
+  assert.equal(byId["not-accessible"], undefined);
+  for (const sent of fixture.requests.filter(req => req.path === "/api/pricing")) {
+    assert.equal(sent.headers.cookie, undefined); assert.equal(sent.headers.authorization, undefined);
+    assert.equal(sent.headers["new-api-user"], "-1");
+  }
   assert.equal(byId["gpt-future"].npm, "@ai-sdk/openai");
   assert.equal(byId["gpt-future"].reasoning, true);
   assert.equal(byId["gpt-future"].image, true);
@@ -188,6 +202,8 @@ test("installed host RPC: authoritative account models, config/runtime SDKs, fal
     assert.equal(fallback.models.find(row => row.id === "claude-opus-4-6").npm, "@ai-sdk/anthropic");
     assert.equal(fallback.models.some(row => row.id === "manual"), true);
     assert.equal(fallback.models.some(row => row.id === "registry-only"), false);
+    assert.deepEqual(fallback.models.find(row => row.id === "friendly").cost, { input: 0, output: 3 });
+    assert.equal(fallback.models.find(row => row.id === "gemini-4-neon").cost, undefined);
     assert.equal((await storedAuth(fixture)).anyrouter.key, apiKey);
   }
   fixture.state.listMode = "empty";
@@ -231,8 +247,8 @@ test("installed host RPC: authoritative account models, config/runtime SDKs, fal
     assert.deepEqual(JSON.parse(sent.body), body);
   }
   t.diagnostic("Real host normalization: native Gemini model SDK/base and signed contents, authoritative model lists and four compatibility switch combinations verified.");
-}, { provider: { anyrouter: { npm: "@ai-sdk/anthropic", api: "https://anyrouter.top/v1", models: {
-  friendly: { id: "gpt-override", provider: { npm: "@ai-sdk/openai-compatible", api: "https://anyrouter.top/v1" }, reasoning: false, attachment: false, tool_call: false, modalities: { input: ["text"], output: ["text"] } },
+}, { provider: { anyrouter: { npm: "@ai-sdk/anthropic", api: "https://anyrouter.top/v1", pricingGroup: "default", models: {
+  friendly: { id: "gpt-override", cost: { input: 0, output: 3 }, provider: { npm: "@ai-sdk/openai-compatible", api: "https://anyrouter.top/v1" }, reasoning: false, attachment: false, tool_call: false, modalities: { input: ["text"], output: ["text"] } },
   disabled: { disabled: true }, manual: { provider: { npm: "@ai-sdk/openai" } },
 } } } }));
 

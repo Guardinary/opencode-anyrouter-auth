@@ -70,6 +70,7 @@ Only installed runtimes are used for the last command. Windows child-process var
 - Native Gemini sends only the account `x-goog-api-key`, never a gateway `key` query parameter or site credentials. Signed contents are not normalized as Codex input; redirects are blocked and each loader fetch sends at most one upstream request.
 - Claude and Codex switches are independent. Keep unknown/signed/opaque input items intact; never invent reasoning effort.
 - Lossy repair is explicitly off by default. Detached tool results require an earlier retained call of the same kind/ID; otherwise fail before fetch.
+- User `cost` is USD per million tokens; valid explicit zeros survive and unspecified fields remain unknown. Public quotes require explicit `provider.anyrouter.pricingGroup`, a current valid group_ratio and an eligible token-billed row. Input is model_ratio × 2 × group_ratio; completion/cache ratios apply only when explicitly valid. Unknown groups, duplicate rows, fixed-request pricing, overflow/underflow and maker/host-placeholder prices never become free. Quotes do not assert actual account billing or a Magpie `rate`; only anonymous pricing is read.
 
 ### Responses, amounts and package
 

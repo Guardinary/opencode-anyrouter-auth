@@ -128,7 +128,7 @@ GET /api/user/self（被拒绝）→ GET /api/status → 一次 POST /api/user/l
 
 更新后在模型页点击“重新获取模型”。如果你曾手动固定某个 Gemini 的 Responses API，请恢复默认，或将 SDK 设为 `@ai-sdk/google`、基础地址设为 `https://anyrouter.top/v1beta`；插件不会偷偷覆盖明确的用户配置。无需重新登录或轮换 Key。历史 Chat Completions 探测仍为 404，不通过自动改协议重发来掩盖错误。
 
-[内置声明](<lib/declared-models.mjs>)提供 16 个登录前展示／临时兜底模型，不默认启用它们。**成功的账号 `/v1/models` 列表是权威，包括空列表**；公开定价、models.dev 和手工配置不向成功列表添加未发现的模型。临时发现失败使用插件自己的保守兜底并带 `fellBack`，不把宿主缓存模型无条件并入。
+[内置声明](<lib/declared-models.mjs>)提供 18 个登录前展示／临时兜底模型，不默认启用它们。**成功的账号 `/v1/models` 列表是权威，包括空列表**；公开定价、models.dev 和手工配置不向成功列表添加未发现的模型。临时发现失败使用插件自己的保守兜底并带 `fellBack`，不把宿主缓存模型无条件并入。
 
 配置与运行时是不同形状。配置模型覆盖使用：
 
@@ -152,6 +152,18 @@ GET /api/user/self（被拒绝）→ GET /api/status → 一次 POST /api/user/l
 ```
 
 运行时才转换为 `api.{id,npm,url}` 和 `capabilities`。用户的显式 `false`、SDK、别名和上限受到尊重；`context`／`input`／`output` 独立处理，不把模型厂商上限伪装成本站明确给出的 input 上限。
+
+### 价格元数据
+
+模型 `cost` 单位为 USD／百万 token，优先保留明确用户配置（包括零）：
+
+```json
+{"provider":{"anyrouter":{"models":{"gemini-4-neon":{"cost":{"input":2,"output":10}}}}}}
+```
+
+如已确认要使用某个站点分组的公开参考价，可在 `provider.anyrouter` 配置 `"pricingGroup":"default"`。仅在本次公开价格响应包含该分组倍率、模型允许该分组且为按 token 计费时，插件填充 `cost`；未选择分组时不假定账号属于 default。输入价为 `model_ratio * 2 * group_ratio`，输出再乘 `completion_ratio`。这是公开分组参考价，不是实际账单、充值汇率或“官方价格的几倍”。
+
+未确认的价格／缓存价格保持缺失；按次计费不能转换成 token 单价。不从厂商 models.dev 价格或宿主占位零值补齐，不猜测 Magpie `rate`。显式用户 `cost` 对象优先，缺失字段不自动填站点价；宿主如何显示缺失价格由宿主决定。无需修改账号凭据。
 
 ## 开关、请求头和参数
 

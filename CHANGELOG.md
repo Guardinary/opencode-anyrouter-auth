@@ -2,6 +2,13 @@
 
 本文件记录 `opencode-anyrouter-auth` 的版本变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+- 增加 Gemini 4 Carbon／Neon 友好名称和核实后的声明能力／上限；声明不保证上游容量。
+- 规范化原生 v1／末尾斜杠路径，精确放行 `countTokens`；拒绝缺少有效 `totalTokens` 的成功响应，不估算、不重试。移除确认未引用的旧协议辅助代码。
+- 增加 Google RESOURCE_EXHAUSTED／UNAVAILABLE、中文负载上限和 HTTP500／503 的保守诊断；余额／配额／权限业务错误优先，部分／签名输出保持原样，生成原生错误符合 Google SDK 格式。
+- 保留明确用户 `cost`；通过 `provider.anyrouter.pricingGroup` 明确选择公开计价分组后，可映射 AnyRouter USD／百万 token 报价。不把未知分组／缓存／按次计费或溢出／下溢价格当成免费，不继承厂商价格或猜测 `rate`。
+
 ## [0.2.2] — 2026-11-26（Gemini 原生协议修复）
 
 - 修复 Gemini 被误分派到 Responses 的 404：默认使用 `@ai-sdk/google` 和官方 `/v1beta`，保留用户 SDK 及已识别端点元数据优先级。

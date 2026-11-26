@@ -80,13 +80,15 @@ usage／checkin 按站点 UID 串行执行。执行与 POST 前检查凭据快�
 
 config 模型使用 `provider.{npm,api}`、`reasoning`、`attachment`、`tool_call`、`modalities`。运行时使用 `api.{id,npm,url}` 与 `capabilities`；两者显式转换，不能靠宿主默认字段推断用户意图。
 
-- 无登录时可以预览 16 个声明模型；无 Key 的已登录账号返回零模型／零模型网络请求。
+- 无登录时可以预览 18 个声明模型；无 Key 的已登录账号返回零模型／零模型网络请求。
 - 成功账号列表权威，包括空列表。显式别名／禁用／元数据应用于已发现 ID，不把缺失手工 ID 或 registry-only ID追加到成功列表。
 - 临时失败回退插件自己的声明／显式配置，并带 `fellBack`；不无条件并入 models.dev 或宿主已有模型。宿主自身可以保留此前账号缓存，其展示策略不由插件改写。
 - 用户显式模型 SDK 优先于账号端点元数据和家族默认。Claude／cc-format 默认 Messages；GPT/Codex 默认 Responses；Gemini 默认原生 Google，模型 SDK 基址为官方 `/v1beta`，账号发现仍为 `/v1/models`。2026-11-26 neon 原生 SSE 实测成功，carbon 受负载限制，2.5-pro 仍 404，不按模型名字或目录存在就承诺可用。
-- 原生生成请求仅放行 `/v1beta/models/{model}:generateContent` 和 `:streamGenerateContent`，不改其签名内容或注入 Codex/Claude 字段，清除 query Key 并使用账号的 `x-goog-api-key`。允许原生路径不等于允许任意 Google 文件／删除／缓存操作。
+- 原生动作只放行 `generateContent`、`streamGenerateContent` 与 `countTokens`，官方 v1／末尾斜杠形式规范化为 `/v1beta`；不改签名内容或注入 Codex/Claude 字段，清除 query Key 并使用账号的 `x-goog-api-key`。计数 HTTP200 需有效非负安全整数 `totalTokens`，不能是候选／错误响应；失败不估算或重试。允许原生路径不等于允许任意 Google 文件／删除／缓存操作。
 - 上限和能力逐字段处理，明确 false 不被默认覆盖；context/input/output 独立，厂商 input 不能冒充本站明确 input。
 - HTML WAF 401 与已识别客户端拒绝不宣告模型 Key 失效；其他模型接口 JSON 401会按模型认证拒绝报告。控制台失败不代替模型判断。
+
+价格与能力来源独立：用户明确 `cost` 采用 USD／百万 token，保留零值，不填缺失字段。`provider.anyrouter.pricingGroup` 明确选定公开计价分组后，且当次公开响应给出分组倍率／模型允许该组／按 token 计费时，才转换 `model_ratio * 2 * group_ratio` 及补全倍率为参考 `cost`。未选组、未知／重复报价、按次计费、缺失缓存倍率、浮点溢出或非零下溢均保持未知。不能把公开默认价当作账号实际账单、充值汇率、厂商价格或 Magpie `rate`；不增加认证价格请求。
 
 ## 7. 发送和响应不变量
 
