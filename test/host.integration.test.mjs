@@ -285,7 +285,20 @@ test("installed host RPC: authoritative account models, config/runtime SDKs, fal
     assert.equal(sent.headers.cookie, undefined);
     assert.deepEqual(JSON.parse(sent.body), body);
   }
-  t.diagnostic("Real host normalization: native Gemini model SDK/base and signed contents, authoritative model lists and four compatibility switch combinations verified.");
+  const beforeDisabledCalls = fixture.requests.length;
+  assert.deepEqual((await rpc("calls", { provider: "anyrouter", account: "anyrouter", since: 0 })).result.calls, []);
+  assert.equal(fixture.requests.length, beforeDisabledCalls);
+  const timestamp = Math.floor(Date.now() / 1000) - 1;
+  fixture.state.tokens = [{ id: 7, user_id: 123, key: apiKey }, { id: 8, user_id: 123, key: "synthetic-other-client" }];
+  fixture.state.logs = [7, 8].map((token_id, index) => ({ id: 9301 + index, type: 2, user_id: 123, token_id, created_at: timestamp,
+    model_name: "gpt-future", prompt_tokens: 100, completion_tokens: 20, other: '{"cache_tokens":0}' }));
+  const sessionAuth = saveAccount({ mode: "session", site: "top", siteURL: "https://anyrouter.top", userId: "123", key: apiKey, keyId: "7", session: `session=${fixture.state.cookie}`, loginGeneration: "synthetic-host-auto" });
+  await rpc("import", { provider: "anyrouter", key: "anyrouter", auth: sessionAuth });
+  await rpc("setProviderOptions", { options: { anyrouter: { "site-external-usage": true } } });
+  const autoCalls = (await rpc("calls", { provider: "anyrouter", account: "anyrouter", since: timestamp * 1000 })).result.calls;
+  assert.deepEqual(autoCalls.map(call => call.rid), ["anyrouter:123:log:9302"]);
+  assert.equal(JSON.stringify(await storedAuth(fixture)).includes("synthetic-other-client"), false);
+  t.diagnostic("Real host normalization: native Gemini, authoritative models, pricing cache, independent switches and GUI automatic current-Key exclusion verified.");
 }, { provider: { anyrouter: { npm: "@ai-sdk/anthropic", api: "https://anyrouter.top/v1", pricingGroup: "default", models: {
   friendly: { id: "gpt-override", cost: { input: 0, output: 3 }, provider: { npm: "@ai-sdk/openai-compatible", api: "https://anyrouter.top/v1" }, reasoning: false, attachment: false, tool_call: false, modalities: { input: ["text"], output: ["text"] } },
   disabled: { disabled: true }, manual: { provider: { npm: "@ai-sdk/openai" } },

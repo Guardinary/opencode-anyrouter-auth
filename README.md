@@ -123,10 +123,12 @@ GET /api/user/self（被拒绝）→ GET /api/status → 一次 POST /api/user/l
 
 ### 站外用量同步（显式开启）
 
-Magpie `auth.calls` 默认返回空列表，不发送请求。要同步外部客户端消费，需在 `provider.anyrouter` 配置 `externalUsageKeyIds`，例如 `{"externalUsageKeyIds":[12345]}`；示例 ID 需替换为你已有的、**只用于外部客户端、不用于任何 Magpie 账号**的 Key ID。最多十个，不创建或轮换 Key。
+Magpie `auth.calls` 默认返回空列表，不发送请求。普通用户在 GUI 开启 **同步站外用量（自动排除当前 Key）**（`site-external-usage`）即可，无需填写外部 Key ID：
 
-- 仅本站会话／系统令牌账号可读；先核对当前 UID，再只读取得目标 Key 元数据，拒绝当前 Magpie Key ID／同一模型 Key、掩码或不明确的 Key。
-- 本站没有可靠的客户端来源字段，**同一 Key 的 Magpie 与外部流量不能自动区分**。ID 配置是你的外部专用用途声明，不是站点来源证明；不能填入共用 Key。
+- 仅本站会话／系统令牌账号可读；先校验当前 UID，再只读识别当前 Key ID 并排除其日志。已保存的 ID 仍需核对实际 Key；没有 ID 时读取完整有界列表。无法唯一识别、身份不符或列表截断时明确失败，不猜测来源。
+- 余额／签到专用账号没有当前模型 Key，读取全部完整日志；有模型 Key 的账号导入其他 Key 的日志，包括已有日志里的历史 Key ID。
+- 本站没有可靠客户端来源字段。**其他 Key 也可能被另一 Magpie 账号、进程或设备使用，自动同步仍可能重复计账；当前 Key 的站外消费默认不导入。** 开启前 GUI 会提示该限制。
+- 高级白名单继续兼容：`provider.anyrouter.externalUsageKeyIds`（最多十个唯一正整数）优先于 GUI 自动选择，且显式空数组关闭同步。指定 ID 必须只用于外部客户端，不用于任何 Magpie 账号；插件校验元数据并拒绝当前 ID／同一 Key／掩码。它是用途声明，不是站点来源证明。不创建或轮换 Key。
 - 固定游标时间窗口内完整读取 100 条／页、最多 20 页，按 `token_id` 筛选；重复 ID、总数变化、身份／时间不符、未知缓存用量、取消或 Cookie 保存失败都会使读取失败，不推进宿主游标、不返回部分消费。
 - `rid` 为 UID 作用域的稳定站点日志 ID；秒级日志转为毫秒，不编造毫秒精度。缓存读／写与普通输入分开，消费 `cost` 使用既有 `quotaPerUnit` 换算；缺失费用不猜零。
 - 不导出日志正文、用户名、Key、Cookie 或任意 `other` 字段。Cookie 轮换只按既有队列和凭据快照安全保存。同步调度与去重由 Magpie 控制，插件不新建后台定时器。
@@ -186,6 +188,8 @@ Magpie `auth.calls` 默认返回空列表，不发送请求。要同步外部客
 
 | Provider 开关 | 默认 | 作用 |
 | --- | --- | --- |
+| `site-today-spend` | **关** | 额外查询北京时间今日消耗；限流即停止 |
+| `site-external-usage` | **关** | 自动排除当前 Key 后同步其他 Key／余额专用账号日志；需确认来源与重复计账限制 |
 | `send-codex-headers` | 开 | 仅 Responses 的 Codex 客户端头与兼容字段，不影响 Claude |
 | `claude-code-compat` | 开 | 仅 Messages 的 Claude 头、system／metadata 与 beta 参数，不影响 Codex |
 | `portable-responses` | 开 | 只内联完整已知历史；不拆散未知、签名、加密或仅资源引用的数据 |

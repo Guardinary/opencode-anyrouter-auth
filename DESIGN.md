@@ -16,7 +16,7 @@ magpie 负责账号文件、账号选择、路由／故障转移、并发上限�
 | [site client](<lib/site-client.mjs>) | 有界站点 HTTP、profile／已有 Key 校验、单次 POST、本地挑战计算 |
 | [usage](<lib/usage.mjs>) | 单一 quota 换算率、北京时间统计和完整日志回退 |
 | [usage cache](<lib/usage-cache.mjs>) | 凭据隔离的短缓存、真实采样时间、独立取消的并发合并 |
-| [external calls](<lib/external-calls.mjs>) | 外部专用 Key 校验、完整有界日志分页与最小化消费导出 |
+| [external calls](<lib/external-calls.mjs>) | GUI 自动排除当前 Key／高级白名单校验、完整有界日志分页与最小化消费导出 |
 | [model pricing](<lib/model-pricing.mjs>) | 显式计价分组、USD／百万 token 换算与未知价格保护 |
 | [catalog](<lib/catalog.mjs>) | 权威账号模型列表、SDK 分派与保守兜底 |
 | [model metadata](<lib/model-metadata.mjs>) | 逐字段能力、上限、显式 false 与 variants |
