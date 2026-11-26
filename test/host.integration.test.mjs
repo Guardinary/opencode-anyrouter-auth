@@ -206,6 +206,13 @@ test("installed host RPC: authoritative account models, config/runtime SDKs, fal
   assert.equal(byId["gpt-future"].cost, undefined);
   assert.deepEqual(byId.friendly.cost, { input: 0, output: 3 });
   assert.equal(byId["not-accessible"], undefined);
+  const pricesBeforeReload = fixture.requests.filter(req => req.path === "/api/pricing").length;
+  const modelsBeforeReload = fixture.requests.filter(req => req.path === "/v1/models").length;
+  await rpc("reload", { provider: "anyrouter", account: "anyrouter" });
+  const recatalog = await providerRow(host);
+  assert.ok(fixture.requests.filter(req => req.path === "/v1/models").length > modelsBeforeReload, "model permissions must still be refreshed");
+  assert.equal(fixture.requests.filter(req => req.path === "/api/pricing").length, pricesBeforeReload, "host refresh must reuse anonymous pricing");
+  assert.deepEqual(recatalog.models.find(model => model.id === "gemini-4-neon").cost, { input: 2, output: 10 });
   for (const sent of fixture.requests.filter(req => req.path === "/api/pricing")) {
     assert.equal(sent.headers.cookie, undefined); assert.equal(sent.headers.authorization, undefined);
     assert.equal(sent.headers["new-api-user"], "-1");
