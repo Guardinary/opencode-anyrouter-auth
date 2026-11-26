@@ -17,9 +17,9 @@ const account = (extra = {}) => ({
 
 const provider = () => ({ id: "anyrouter", models: declaredModels() });
 
-test("declared model catalog contains the 16 public AnyRouter models with protocol-specific SDKs", () => {
+test("declared model catalog contains the 18 public AnyRouter models with protocol-specific SDKs", () => {
   const models = declaredModels();
-  assert.equal(Object.keys(models).length, 16);
+  assert.equal(Object.keys(models).length, 18);
   assert.deepEqual(Object.keys(models), DECLARED_MODEL_IDS);
   assert.equal(models["claude-opus-4-6"].limit.context, 500_000);
   assert.equal(models["claude-opus-4-6"].limit.output, 32_000);
@@ -45,7 +45,7 @@ test("buildCatalog applies declared models, protocol SDKs and the single AnyRout
     api: "https://anyrouter.top/v1",
     models: {}
   });
-  assert.equal(Object.keys(out).length, 16);
+  assert.equal(Object.keys(out).length, 18);
   for (const model of Object.values(out)) {
     assert.equal(model.api.url, model.api.npm === "@ai-sdk/google" ? "https://anyrouter.top/v1beta" : "https://anyrouter.top/v1");
   }
@@ -132,7 +132,7 @@ test("discovery failure falls back to the provider-declared models with a visibl
     loadRegistry: async () => { throw new Error("offline registry"); }
   });
   const out = await catalog(provider(), account());
-  assert.equal(Object.keys(out).length, 16);
+  assert.equal(Object.keys(out).length, 18);
   assert.equal(out[Symbol.for("magpie.fellBack")], true);
   assert.equal(out["claude-opus-4-6"].api.npm, "@ai-sdk/anthropic");
 });

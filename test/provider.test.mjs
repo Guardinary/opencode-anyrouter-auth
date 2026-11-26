@@ -117,7 +117,7 @@ test("password and access-token hand off with method 'auto'; GitHub/LinuxDO/sess
   }
 });
 
-test("provider defaults to the AnyRouter Anthropic base with 16 declared models and no fcapp endpoint", async () => {
+test("provider defaults to the AnyRouter Anthropic base with 18 declared models and no fcapp endpoint", async () => {
   const hooks = await createProvider();
   const cfg = {};
   await hooks.config(cfg);
@@ -125,7 +125,7 @@ test("provider defaults to the AnyRouter Anthropic base with 16 declared models 
   assert.equal(provider.name, "AnyRouter");
   assert.equal(provider.npm, "@ai-sdk/anthropic");
   assert.equal(provider.api, "https://anyrouter.top/v1");
-  assert.equal(Object.keys(provider.models).length, 16);
+  assert.equal(Object.keys(provider.models).length, 18);
   assert.deepEqual(Object.keys(provider.models), DECLARED_MODEL_IDS);
   assert.equal(provider.models["claude-opus-4-6"].api, undefined, "Claude inherits the provider's Anthropic SDK");
   assert.equal(provider.models["gpt-6-astra-cc-format"].api, undefined, "cc-format speaks Anthropic Messages");

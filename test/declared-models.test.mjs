@@ -5,9 +5,9 @@ import { DECLARED_MODEL_IDS, MODEL_SHAPE, declaredModels } from "../lib/declared
 const RESPONSES_MODELS = ["gpt-5-codex", "gpt-6-astra", "gpt-6.1-sol"];
 const CLAUDE_IDS = DECLARED_MODEL_IDS.filter(id => id.startsWith("claude-"));
 
-test("declaredModels returns the 16 default-group models with complete model shapes", () => {
+test("declaredModels returns the 18 default-group models with complete model shapes", () => {
   const models = declaredModels();
-  assert.equal(Object.keys(models).length, 16);
+  assert.equal(Object.keys(models).length, 18);
   assert.deepEqual(Object.keys(models).sort(), [...DECLARED_MODEL_IDS].sort());
 
   for (const id of DECLARED_MODEL_IDS) {

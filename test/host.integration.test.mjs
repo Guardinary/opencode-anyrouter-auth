@@ -215,12 +215,13 @@ test("installed host RPC: authoritative account models, config/runtime SDKs, fal
     assert.equal(Boolean(JSON.parse(sent.body).client_metadata), codex);
     assert.equal(Boolean(sent.headers.originator), codex);
   }
-  for (const action of ["generateContent", "streamGenerateContent"]) {
+  for (const action of ["generateContent", "streamGenerateContent", "countTokens"]) {
     const body = { contents: [{ role: "user", parts: [{ text: "synthetic", thoughtSignature: "retain-synthetic-signature" }] }], generationConfig: { maxOutputTokens: 16 } };
     const before = fixture.requests.length;
     const result = await modelFetch(host, "gemini-4-neon", "@ai-sdk/google", `https://anyrouter.top/v1beta/models/gemini-4-neon:${action}?alt=sse`, body);
     assert.equal(head(result).status, 200);
-    assert.match(responseBody(result.events), /safe-gemini-result/);
+    if (action === "countTokens") assert.equal(JSON.parse(responseBody(result.events)).totalTokens, 5);
+    else assert.match(responseBody(result.events), /safe-gemini-result/);
     assert.equal(fixture.requests.length - before, 1);
     const sent = fixture.requests.at(-1);
     assert.equal(sent.path, `/v1beta/models/gemini-4-neon:${action}`);
