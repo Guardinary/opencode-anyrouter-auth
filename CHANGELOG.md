@@ -2,7 +2,7 @@
 
 本文件记录 `opencode-anyrouter-auth` 的版本变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
-## [Unreleased]
+## [0.2.4] — 2026-11-26（额度与站外同步体验优化）
 
 - 额度默认只查余额／累计消耗，今日统计改为 GUI 显式开关；限流不再继续日志回退。
 - 同凭据并发额度读取合并，调用者独立取消；成功结果缓存 60 秒并显示真实采样时间。冷却时的过期余额仅作有界历史文本，不返回路由钱包；凭据／登录代次、Cookie 到期和今日跨日保持隔离。
