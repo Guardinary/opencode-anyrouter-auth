@@ -15,6 +15,7 @@ magpie 负责账号文件、账号选择、路由／故障转移、并发上限�
 | [account operations](<lib/account-operations.mjs>) | UID 队列、最新记录补丁、保存竞争保护与取消 |
 | [site client](<lib/site-client.mjs>) | 有界站点 HTTP、profile／已有 Key 校验、单次 POST、本地挑战计算 |
 | [usage](<lib/usage.mjs>) | 单一 quota 换算率、北京时间统计和完整日志回退 |
+| [usage cache](<lib/usage-cache.mjs>) | 凭据隔离的短缓存、真实采样时间、独立取消的并发合并 |
 | [external calls](<lib/external-calls.mjs>) | 外部专用 Key 校验、完整有界日志分页与最小化消费导出 |
 | [model pricing](<lib/model-pricing.mjs>) | 显式计价分组、USD／百万 token 换算与未知价格保护 |
 | [catalog](<lib/catalog.mjs>) | 权威账号模型列表、SDK 分派与保守兜底 |
@@ -74,7 +75,9 @@ usage／checkin 按站点 UID 串行执行。执行与 POST 前检查凭据快�
 
 金额使用整数长除法；标准换算率精确到单 quota，非常规率最多展开 18 位小数并截断。合法安全整数率不会把单 quota 显示成零，不宣称任意分母能精确用有限小数表示。
 
-今日统计在 self 返回后重新取北京时间窗口。stat 无有效值时回退日志，100 条／页、最多 20 页；完整总数、页号、条目 quota、时间／UID和重复页／ID都检查。未知或不完整数据不能变成零或部分总数；取消不能触发另一轮回退。
+额度默认只读 self；GUI `site-today-spend` 显式开启才读今日统计。今日统计在 self 返回后重新取北京时间窗口。stat 无有效值时回退日志，100 条／页、最多 20 页；完整总数、页号、条目 quota、时间／UID和重复页／ID都检查。未知或不完整数据不能变成零或部分总数；取消或限流不能触发另一轮回退。
+
+同凭据额度并发读取合并，调用者独立取消；成功结果在当前实例缓存 60 秒，最多 64 个凭据作用域。缓存显示实际 self 完成的北京时间；登录／凭据变化、Cookie 到期、保存失败和今日跨日不会复用新鲜样本。共享控制台冷却期间的过期样本最多保留 5 分钟，只展示历史文本，不返回数值钱包。详见[额度使用规则](<README.md#余额累计消耗与今日消耗>)。
 
 控制台会话失效只影响控制台数据，usage 返回 `signIn: kept`，不把独立模型 Key 宣告失效。
 

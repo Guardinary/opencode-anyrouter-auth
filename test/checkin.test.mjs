@@ -57,7 +57,7 @@ async function makeProvider(steps, { now = dayNow, auth = stored() } = {}) {
         }
       }
     }
-  }, {}, { fetchImpl: h.fetchImpl, now: () => now });
+  }, {}, { fetchImpl: h.fetchImpl, now: () => typeof now === "function" ? now() : now });
   return { hooks, h, writes, state, getAuth: async () => state.auth };
 }
 
@@ -220,17 +220,23 @@ test("404 and 405 sign-in responses are inactive without a confirmed completion 
 test("429 and 5xx sign-in failures are failed and never persist lastCheckinDay", async t => {
   for (const status of [429, 503]) {
     await t.test(String(status), async () => {
+      let time = dayNow;
       const { hooks, h, writes, state, getAuth } = await makeProvider([
         self(),
         signIn({ success: false, message: "请求次数过多" }, status),
         self(),
         signIn({ success: false, message: "请求次数过多" }, status)
-      ]);
+      ], { now: () => time });
       const first = await hooks.auth.checkin(getAuth, {});
       assert.equal(first.outcome, "failed");
       assert.equal(writes.length, 0);
       assert.equal(readAccount(state.auth).lastCheckinDay, "");
 
+      const paused = await hooks.auth.checkin(getAuth, {});
+      assert.equal(paused.outcome, "failed");
+      assert.match(paused.message, /限流/);
+      assert.equal(h.calls.length, 2, "an immediate retry must not submit another POST");
+      time += 60000;
       const second = await hooks.auth.checkin(getAuth, {});
       assert.equal(second.outcome, "failed");
       assert.deepEqual(h.calls.map(call => call.url.pathname), [

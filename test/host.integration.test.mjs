@@ -102,6 +102,10 @@ test("installed host RPC: login prompts, jar persistence, rotation/check-in, mis
   assert.deepEqual(balanceOnly.result.windows.map(window => window.name), ["累计消耗", "余额"]);
   assert.equal(fixture.requests.length - beforeDefaultUsage, 1);
   assert.equal(balanceOnly.result.balance, "$24.691356");
+  const cachedBalance = await rpc("usage", { provider: "anyrouter", account: "anyrouter", proxy: "direct" });
+  assert.equal(fixture.requests.length - beforeDefaultUsage, 1, "host quota refresh must reuse the actual short sample");
+  assert.match(cachedBalance.result.windows[1].display, /缓存.*采样/);
+  assert.equal(cachedBalance.result.windows[1].balance, 24.691356);
   fixture.state.selfRotation = true;
   await rpc("setProviderOptions", { options: { anyrouter: { "site-today-spend": true } } });
   const usage = await rpc("usage", { provider: "anyrouter", account: "anyrouter", proxy: "direct" });
@@ -117,6 +121,10 @@ test("installed host RPC: login prompts, jar persistence, rotation/check-in, mis
   assert.deepEqual(rotated.metadata, { hostOwned: true });
   assert.equal(rotated.hostExtension, "preserve");
   assert.equal(readAccount(rotated).loginGeneration, readAccount(account).loginGeneration);
+  const afterRotation = fixture.requests.length;
+  const cachedRotated = await rpc("usage", { provider: "anyrouter", account: "anyrouter", proxy: "direct" });
+  assert.equal(fixture.requests.length, afterRotation, "persisted cookie rotation must not discard the fresh cache");
+  assert.match(cachedRotated.result.windows[1].display, /缓存.*采样/);
   fixture.state.selfRotation = false;
   const checked = await rpc("checkin", { provider: "anyrouter", account: "anyrouter", proxy: "direct" });
   assert.equal(checked.result.outcome, "claimed");

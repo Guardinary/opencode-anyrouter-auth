@@ -21,8 +21,8 @@ test("package gate validates source metadata, runtime graph and no-network impor
   const value = JSON.parse(result.stdout);
   assert.equal(value.package, "opencode-anyrouter-auth");
   assert.equal(value.import, true);
-  assert.equal(value.runtimeModules, 21);
-  assert.equal(value.publishedFiles, 30);
+  assert.equal(value.runtimeModules, 22);
+  assert.equal(value.publishedFiles, 31);
 });
 
 test("archive fixture reports bounded, redacted child failures rather than hiding the root cause", async () => {
