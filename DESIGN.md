@@ -1,6 +1,6 @@
 # AnyRouter provider: implementation contract
 
-本文件描述 0.2.2 原生 Gemini 修复版的实际契约。站点观察、离线回归和真实宿主隔离验证是不同证据；不能把其中一种当作另外两种已经通过。
+本文件描述 0.2.3 诊断、计价与站外同步版的实际契约。站点观察、离线回归和真实宿主隔离验证是不同证据；不能把其中一种当作另外两种已经通过。
 
 ## 1. 归属与实现边界
 
@@ -15,10 +15,12 @@ magpie 负责账号文件、账号选择、路由／故障转移、并发上限�
 | [account operations](<lib/account-operations.mjs>) | UID 队列、最新记录补丁、保存竞争保护与取消 |
 | [site client](<lib/site-client.mjs>) | 有界站点 HTTP、profile／已有 Key 校验、单次 POST、本地挑战计算 |
 | [usage](<lib/usage.mjs>) | 单一 quota 换算率、北京时间统计和完整日志回退 |
+| [external calls](<lib/external-calls.mjs>) | 外部专用 Key 校验、完整有界日志分页与最小化消费导出 |
+| [model pricing](<lib/model-pricing.mjs>) | 显式计价分组、USD／百万 token 换算与未知价格保护 |
 | [catalog](<lib/catalog.mjs>) | 权威账号模型列表、SDK 分派与保守兜底 |
 | [model metadata](<lib/model-metadata.mjs>) | 逐字段能力、上限、显式 false 与 variants |
 | [registry](<lib/model-registry.mjs>) | 匿名、有界、可取消的 capability cache 读取，不授予模型访问权 |
-| [declared models](<lib/declared-models.mjs>) | 16 个预览模型及 config／runtime 形状转换 |
+| [declared models](<lib/declared-models.mjs>) | 18 个预览模型及 config／runtime 形状转换 |
 | [headers](<lib/headers.mjs>) | 站点／模型头分离和受管字段 |
 | [request](<lib/request.mjs>) | 已知形状归一化、便携历史、词表、可选有损修复 |
 | [response](<lib/response.mjs>) | 有界空前导证明、早期错误诊断、原始字节回放与诊断脱敏 |

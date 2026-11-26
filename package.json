@@ -1,6 +1,6 @@
 {
   "name": "opencode-anyrouter-auth",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "AnyRouter provider plugin for magpie: scoped cookie sessions, six login methods, balance and today usage, single-shot daily check-in, and Claude/GPT/Gemini routing.",
   "type": "module",
   "main": "./index.mjs",

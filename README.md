@@ -2,7 +2,7 @@
 
 面向 **magpie** 的 AnyRouter（`https://anyrouter.top`）供应商插件：六种登录入口、余额与北京时间今日消耗、由宿主调度的每日签到，以及 Claude / GPT / Gemini 模型分派。
 
-**当前版本：0.2.2，通过独立 GitHub 仓库发布，不发布同名 npm 包。** 源码更新或 GitHub Release 不等于你的生产网关已升级。主要验证宿主为 Magpie 0.1.4720 + Bun 1.4.5；使用 OpenCode 风格的 hooks，但未独立验证原版 OpenCode 的加载器及专有扩展兼容性。
+**当前版本：0.2.3，通过独立 GitHub 仓库发布，不发布同名 npm 包。** 源码更新或 GitHub Release 不等于你的生产网关已升级。主要验证宿主为 Magpie 0.1.4795 + Bun 1.4.5；使用 OpenCode 风格的 hooks，但未独立验证原版 OpenCode 的加载器及专有扩展兼容性。
 
 运行时依赖 `tough-cookie` 6；本项目的 [锁文件](<pnpm-lock.yaml>) 固定了实际依赖。插件不执行远端 JavaScript，不启动代理／保活服务，不建立自己的账号池，不创建或轮换站点 Key，也不在推理 fetch 内自动重试。
 
@@ -13,12 +13,12 @@
 按 [Magpie 官方发布说明](<https://usemagpie.ai/docs/zh/plugins#发布与上架>)，此仓库根目录提交可直接加载的入口，不依赖发布时才生成的 dist。可以固定 Release 对应标签：
 
 ```sh
-magpie plugin add github:Guardinary/opencode-anyrouter-auth#v0.2.2
+magpie plugin add github:Guardinary/opencode-anyrouter-auth#v0.2.3
 magpie plugin login anyrouter
 magpie quota anyrouter --json
 ```
 
-不写 `#v0.2.2` 时安装默认分支代码。仓库的 `magpie-plugin` topic 用于“非官方插件 · GitHub”发现，**不代表官方审核或推荐列表收录**。本仓库没有把同名上游 npm 包当作自己的发布物。
+不写 `#v0.2.3` 时安装默认分支代码。仓库的 `magpie-plugin` topic 用于“非官方插件 · GitHub”发现，**不代表官方审核或推荐列表收录**。本仓库没有把同名上游 npm 包当作自己的发布物。
 
 ### 本地源码
 
@@ -213,6 +213,8 @@ Magpie `auth.calls` 默认返回空列表，不发送请求。要同步外部客
 细节见[安全说明](<SECURITY.md>)与[实现契约](<DESIGN.md>)。
 
 ## 已验证与未验证
+
+0.2.3 本地优化验收（2026-11-26）：Node 527 项中 524 通过、Bun 503 项中 500 通过，均零失败；各有三项普通运行下的宿主 opt-in 跳过，这三项在 Magpie 0.1.4795 的隔离宿主／CLI 中另跑全部通过、零跳过。包图、私有哨兵排除和实际归档离线导入通过。执行细节与未验证的线上条件见[优化验收记录](<docs/validation/optimization-plan.md#L63-L69>)。
 
 2026-11-24 的本地验收：Node 26.5.0、Bun 1.4.5 的全套离线回归，以及 Magpie 0.1.4720 的真实宿主／CLI 隔离测试通过。它们使用合成凭据和本机模拟服务，不是对线上 Claude／Gemini 可用性、真实奖励金额或真实登录端到端的证明。
 

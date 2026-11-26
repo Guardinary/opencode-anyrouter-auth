@@ -2,7 +2,7 @@
 
 本文件记录 `opencode-anyrouter-auth` 的版本变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
-## [Unreleased]
+## [0.2.3] — 2026-11-26（诊断、计价与站外同步）
 
 - 增加 Gemini 4 Carbon／Neon 友好名称和核实后的声明能力／上限；声明不保证上游容量。
 - 规范化原生 v1／末尾斜杠路径，精确放行 `countTokens`；拒绝缺少有效 `totalTokens` 的成功响应，不估算、不重试。移除确认未引用的旧协议辅助代码。
