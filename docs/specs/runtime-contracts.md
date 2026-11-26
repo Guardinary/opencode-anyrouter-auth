@@ -20,7 +20,8 @@ hasSession(account, now, exactURL)
 createSiteClient({fetchImpl, timeoutMs, now}).openSession(account, {signal, beforeMutation})
 createAccountOperations({site, client, timeoutMs, now}).run(action, getAuth, provider, signal, work)
 createCatalog({site, explicit, compatibility, fetchImpl, loadRegistry})(provider, account, {signal})
-explainResponse(response, {retryAfterSeconds, signal, account})
+explainResponse(response, {retryAfterSeconds, signal, account, protocol})
+verifyTokenCountResponse(response, {signal})
 prepareRequest(input, init, {portableResponses, textFilter, sessionRepair})
 formatUSD(integerQuota, positiveSafeIntegerRate)
 ```
@@ -65,7 +66,7 @@ Only installed runtimes are used for the last command. Windows child-process var
 - Config uses `model.provider.{npm,api}`, top-level reasoning/attachment/tool_call/modalities. Runtime uses `model.api.{id,npm,url}` and capabilities.
 - Successful account lists, including empty lists, are authoritative. Public registry/pricing and manual-only IDs never grant account access.
 - Keyless account returns zero models and sends no model request. Preview/failure fallback comes from plugin declarations and explicit settings, not arbitrary host catalog union.
-- Claude/cc-format defaults to Messages; GPT/Codex to Responses; Gemini defaults to native Google (`@ai-sdk/google`, official `/v1beta`). `generateContent` and `streamGenerateContent` are the only newly allowed native actions. Model discovery remains `/v1/models`. Explicit model SDK/recognized endpoint metadata overrides family defaults; it does not prove upstream availability.
+- Claude/cc-format defaults to Messages; GPT/Codex to Responses; Gemini defaults to native Google (`@ai-sdk/google`, official `/v1beta`). Native actions are exactly `generateContent`, `streamGenerateContent`, and `countTokens`; official v1/trailing-slash variants normalize to `/v1beta`. Counting accepts only HTTP200 JSON with a safe nonnegative integer `totalTokens` and no candidate/error envelope; incompatible success shapes yield an explicit native 502 without estimates or retries. Non-200 count responses stay intact. Model discovery remains `/v1/models`. Explicit model SDK/recognized endpoint metadata overrides family defaults; it does not prove upstream availability.
 - Native Gemini sends only the account `x-goog-api-key`, never a gateway `key` query parameter or site credentials. Signed contents are not normalized as Codex input; redirects are blocked and each loader fetch sends at most one upstream request.
 - Claude and Codex switches are independent. Keep unknown/signed/opaque input items intact; never invent reasoning effort.
 - Lossy repair is explicitly off by default. Detached tool results require an earlier retained call of the same kind/ID; otherwise fail before fetch.
@@ -75,6 +76,7 @@ Only installed runtimes are used for the last command. Windows child-process var
 - JSON clone: 64 KiB / 2 seconds. SSE prelude: 64 KiB / 15 seconds. Request clone: 4 MiB / 2 seconds. Site body: 2 MiB within operation budget. Anonymous registry: 32 MiB / private metadata deadline.
 - Unknown/semantic/signed state, excessive proof depth or invalid SSE UTF-8 releases original bytes; only proven empty typed metadata can be skipped/repackaged. Preserve backpressure and the in-flight read.
 - Generated diagnostics redact known credential echoes and do not copy structured unknown error codes. Raw model output/headers are not universally scrubbed. Rebuilt body headers must drop stale digests/length/encoding.
+- Canonical Google RESOURCE_EXHAUSTED/UNAVAILABLE and exact Chinese load-capacity wording may diagnose early empty JSON/SSE errors. Business authentication/permission/quota/balance markers win. HTTP500/503 require explicit meaningful detail and retain the transport status; unknown/detail-less/semantic responses stay original. HTTP400/429 behavior is unchanged. Only generated native failures receive numeric `error.code`/canonical `error.status`; SSE media-type parameters never turn raw replay into JSON.
 - Use the same validated quota rate for display and numeric values. Nonstandard rates are truncated at 18 decimal places; nonzero single quota cannot display zero at any allowed safe-integer rate.
 - Daily log fallback requires complete, consistent, nonduplicated pages and matching UID/time. Cancellation cannot publish a partial total or start another fallback.
 - Runtime publish allowlist is explicit docs/assets plus `lib/*.mjs`; optional private JSON is not published. Packer fixture injects private sentinels into its own source copy and verifies absence in actual decompressed tarball before import.
