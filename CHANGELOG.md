@@ -9,6 +9,8 @@
 - 增加 Google RESOURCE_EXHAUSTED／UNAVAILABLE、中文负载上限和 HTTP500／503 的保守诊断；余额／配额／权限业务错误优先，部分／签名输出保持原样，生成原生错误符合 Google SDK 格式。
 - 保留明确用户 `cost`；通过 `provider.anyrouter.pricingGroup` 明确选择公开计价分组后，可映射 AnyRouter USD／百万 token 报价。不把未知分组／缓存／按次计费或溢出／下溢价格当成免费，不继承厂商价格或猜测 `rate`。
 
+- 增加默认关闭的 `auth.calls` 站外用量同步：仅导入明确声明的外部专用 Key ID；校验本人 UID、当前模型 Key 差异、稳定日志 ID、缓存拆分和完整有界分页。失败不返回部分列表或推进游标，不导出日志正文／秘密；不支持同 Key 流量的自动来源区分。
+
 ## [0.2.2] — 2026-11-26（Gemini 原生协议修复）
 
 - 修复 Gemini 被误分派到 Responses 的 404：默认使用 `@ai-sdk/google` 和官方 `/v1beta`，保留用户 SDK 及已识别端点元数据优先级。

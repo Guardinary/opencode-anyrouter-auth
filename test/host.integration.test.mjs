@@ -142,8 +142,26 @@ test("installed host RPC: login prompts, jar persistence, rotation/check-in, mis
   assert.match(sent.at(-1).headers["user-agent"], /^codex_exec\//);
   assert.equal(JSON.parse(sent.at(-1).body).prompt_cache_key, "synthetic-session");
   assert.doesNotMatch(JSON.stringify(host.events.filter(event => event.event === "log")), /site-password|sk-synthetic-offline-model|session=s123/);
-  t.diagnostic("Isolated host RPC: six prompts, one UID account, persisted rotation, one check-in POST and one upstream inference fetch verified.");
-}));
+  const timestamp = Math.floor(Date.now() / 1000) - 1;
+  fixture.state.tokens = [{ id: 8, user_id: 123, key: "synthetic-external-only" }];
+  fixture.state.logs = [
+    { id: 9001, type: 2, user_id: 123, token_id: 8, created_at: timestamp, model_name: "gpt-future", prompt_tokens: 100, completion_tokens: 20, quota: 1000000, other: '{"cache_tokens":30}', content: "private external prompt" },
+    { id: 9002, type: 2, user_id: 123, token_id: 7, created_at: timestamp, content: "already gateway known" },
+  ];
+  fixture.state.selfRotation = true;
+  const beforeCalls = fixture.requests.length;
+  const external = (await rpc("calls", { provider: "anyrouter", account: "anyrouter", since: timestamp * 1000 })).result;
+  assert.deepEqual(external.calls, [{ rid: "anyrouter:123:log:9001", t: timestamp * 1000, model: "gpt-future", in: 70, out: 20, cache_read: 30, cache_write: 0, cost: 2, session: "" }]);
+  const repeated = (await rpc("calls", { provider: "anyrouter", account: "anyrouter", since: timestamp * 1000 })).result;
+  assert.deepEqual(repeated.calls, external.calls, "Repeated reads preserve the host's stable deduplication identity");
+  assert.equal(fixture.requests.slice(beforeCalls).every(req => req.method === "GET"), true);
+  assert.equal(fixture.requests.filter(req => req.path === "/api/user/sign_in").length, 1);
+  assert.match(readAccount((await storedAuth(fixture)).anyrouter).session, /rotated-rotated/);
+  assert.equal(JSON.stringify(await storedAuth(fixture)).includes("synthetic-external-only"), false);
+  fixture.state.logs[0].user_id = 124;
+  await assert.rejects(rpc("calls", { provider: "anyrouter", account: "anyrouter", since: timestamp * 1000 }), /身份|日志/);
+  t.diagnostic("Isolated host RPC: account lifecycle, one inference fetch and external-only Key log normalization/deduplication/identity rejection verified.");
+}, { provider: { anyrouter: { externalUsageKeyIds: [8] } } }));
 
 test("installed host RPC: authoritative account models, config/runtime SDKs, fallback/empty lists and independent switches", {
   skip: hostSkip, timeout: 60000,

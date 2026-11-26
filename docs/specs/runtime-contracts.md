@@ -22,6 +22,8 @@ createAccountOperations({site, client, timeoutMs, now}).run(action, getAuth, pro
 createCatalog({site, explicit, compatibility, fetchImpl, loadRegistry})(provider, account, {signal})
 explainResponse(response, {retryAfterSeconds, signal, account, protocol})
 verifyTokenCountResponse(response, {signal})
+readExternalCalls(op, account, {keyIds, since, signal, check, now, quotaPerUnit})
+auth.calls(getAuth, provider, {since, signal}) // {calls:[{rid,t,model,in,out,cache_read,cache_write,cost?}]}
 prepareRequest(input, init, {portableResponses, textFilter, sessionRepair})
 formatUSD(integerQuota, positiveSafeIntegerRate)
 ```
@@ -80,6 +82,7 @@ Only installed runtimes are used for the last command. Windows child-process var
 - Canonical Google RESOURCE_EXHAUSTED/UNAVAILABLE and exact Chinese load-capacity wording may diagnose early empty JSON/SSE errors. Business authentication/permission/quota/balance markers win. HTTP500/503 require explicit meaningful detail and retain the transport status; unknown/detail-less/semantic responses stay original. HTTP400/429 behavior is unchanged. Only generated native failures receive numeric `error.code`/canonical `error.status`; SSE media-type parameters never turn raw replay into JSON.
 - Use the same validated quota rate for display and numeric values. Nonstandard rates are truncated at 18 decimal places; nonzero single quota cannot display zero at any allowed safe-integer rate.
 - Daily log fallback requires complete, consistent, nonduplicated pages and matching UID/time. Cancellation cannot publish a partial total or start another fallback.
+- External `auth.calls` is no-network/empty unless `externalUsageKeyIds` explicitly declares up to ten unique external-only Key IDs. Self must match UID; read-only token metadata must match ID/optional UID and expose a usable Key different from the current model Key. Shared-Key automatic provenance is unsupported; users must not use designated keys in any Magpie account. Complete 100-row pages/20-page maximum, consistent totals, stable UID-scoped normalized log IDs, required row UID/type/time/token_id and valid cache counts are mandatory. Use the site's explicit Claude marker for cache-exclusive input; other supported prompt counts include cache reads. Invalid/ambiguous fields, duplicate/incomplete pages, cancellation and failed persistence throw, never partial/empty success. Export only rid/t/model/in/out/cache_read/cache_write/cost?, never content/credentials/unknown other fields. Cost uses the selected quotaPerUnit; missing cost stays missing.
 - Runtime publish allowlist is explicit docs/assets plus `lib/*.mjs`; optional private JSON is not published. Packer fixture injects private sentinels into its own source copy and verifies absence in actual decompressed tarball before import.
 - Archive smoke copies the already-installed dependency closure; it is not a fresh online installation test. Do not run lifecycle scripts or publish from checks.
 

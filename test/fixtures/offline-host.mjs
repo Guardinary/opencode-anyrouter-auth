@@ -43,7 +43,7 @@ export async function openOfflineFixture(bun) {
   const state = { listMode: "success", rows: [
     { id: "fixture-responses", supported_endpoint_types: ["responses"], context_length: 10000 },
     { id: "fixture-messages", supported_endpoint_types: ["anthropic"], context_length: 10000 },
-  ], prices: [], groupRatios: { default: 1 }, tokens: [], cookie: "s123", selfRotation: false, expiredSession: false };
+  ], prices: [], groupRatios: { default: 1 }, tokens: [], logs: undefined, cookie: "s123", selfRotation: false, expiredSession: false };
   const server = http.createServer(async (req, res) => {
     try {
       const url = new URL(req.url, "http://127.0.0.1");
@@ -82,6 +82,11 @@ export async function openOfflineFixture(bun) {
       }
       if (url.pathname === "/api/log/self") {
         if (!authorized) return send({ success: false, message: "未登录" }, 401);
+        if (Array.isArray(state.logs)) {
+          const rows = state.logs.filter(row => row.created_at >= Number(url.searchParams.get("start_timestamp")) && row.created_at <= Number(url.searchParams.get("end_timestamp")));
+          const page = Number(url.searchParams.get("p")), size = Number(url.searchParams.get("page_size"));
+          return send({ success: true, data: { items: rows.slice((page - 1) * size, page * size), total: rows.length, page, page_size: size } });
+        }
         return send({ success: true, data: { items: [{ id: 1, type: 2, user_id: 123, quota: 1000000, created_at: Number(url.searchParams.get("end_timestamp")) }], total: 1 } });
       }
       if (url.pathname.startsWith("/api/token/")) {
