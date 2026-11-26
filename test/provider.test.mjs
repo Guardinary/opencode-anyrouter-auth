@@ -150,6 +150,7 @@ test("the plugin exposes the daily-spend toggle and six existing options without
   assert.deepEqual(hooks.auth.options.map(option => option.key), [
     "site-today-spend",
     "site-external-usage",
+    "site-external-same-key",
     "send-codex-headers",
     "claude-code-compat",
     "portable-responses",
@@ -456,6 +457,7 @@ test("the published plugin entry builds the same provider without an internal re
   assert.deepEqual(hooks.auth.options.map(option => option.key), [
     "site-today-spend",
     "site-external-usage",
+    "site-external-same-key",
     "send-codex-headers",
     "claude-code-compat",
     "portable-responses",

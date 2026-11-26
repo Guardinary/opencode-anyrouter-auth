@@ -107,7 +107,7 @@ export async function openOfflineFixture(bun) {
       if (url.pathname === "/v1/dashboard/billing/usage") return send({ total_usage: 1234 });
       if (url.pathname === "/v1/responses") {
         res.writeHead(200, { "content-type": "text/event-stream" });
-        return res.end(frame({ type: "response.completed", response: { status: "completed", output: [{ type: "message", content: [{ type: "output_text", text: "safe-result" }] }] } }));
+        return res.end(frame({ type: "response.completed", response: { status: "completed", output: [{ type: "message", content: [{ type: "output_text", text: "safe-result" }] }], ...(state.responseUsage ? { usage: state.responseUsage } : {}) } }));
       }
       if (/^\/v1beta\/models\/gemini-[A-Za-z0-9._-]+:(?:streamGenerateContent|generateContent|countTokens)$/.test(url.pathname)) {
         if (req.headers["x-goog-api-key"] !== apiKey || req.headers.authorization || req.headers.cookie || req.headers["new-api-user"]) {
